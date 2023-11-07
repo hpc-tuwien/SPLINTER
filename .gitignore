@@ -1,3 +1,5 @@
 .idea
 *.ipynb_checkpoints*
 */models/*
+VGG16/__pycache__/
+resnet50/__pycache__/
