@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+service HelloService {
+  rpc SayHello (SplitRequest) returns (SplitResponse);
+}
+
+message SplitRequest {
+  string network = 1;
+  // 8 bit int should also do it
+  int32 partition_index = 2;
+  // which data type?
+  string tensor = 3;
+}
+
+
+message SplitResponse {
+  // top 5 classes? probs in int
+  string class = 1;
+}
