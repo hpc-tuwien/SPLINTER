@@ -1,19 +1,23 @@
 syntax = "proto3";
 
-service HelloService {
-  rpc SayHello (SplitRequest) returns (SplitResponse);
+service SplitService {
+  rpc SplitCompute (SplitRequest) returns (SplitResponse);
+}
+
+enum Network {
+  VGG16 = 0;
+  RESNET50 = 1;
+  MOBILENETV2 = 2;
 }
 
 message SplitRequest {
-  string network = 1;
-  // 8 bit int should also do it
+  Network network = 1;
   int32 partition_index = 2;
-  // which data type?
-  string tensor = 3;
+  bytes tensor = 3;
+  bool quantized_tail = 4;
 }
 
-
 message SplitResponse {
-  // top 5 classes? probs in int
-  string class = 1;
+  repeated string classes = 1;
+  int32 server_time = 2;
 }
