@@ -16,16 +16,14 @@ RESNET50: Network
 MOBILENETV2: Network
 
 class SplitRequest(_message.Message):
-    __slots__ = ["network", "partition_index", "tensor", "quantized_tail"]
+    __slots__ = ["network", "partition_index", "tensor"]
     NETWORK_FIELD_NUMBER: _ClassVar[int]
     PARTITION_INDEX_FIELD_NUMBER: _ClassVar[int]
     TENSOR_FIELD_NUMBER: _ClassVar[int]
-    QUANTIZED_TAIL_FIELD_NUMBER: _ClassVar[int]
     network: Network
     partition_index: int
     tensor: bytes
-    quantized_tail: bool
-    def __init__(self, network: _Optional[_Union[Network, str]] = ..., partition_index: _Optional[int] = ..., tensor: _Optional[bytes] = ..., quantized_tail: bool = ...) -> None: ...
+    def __init__(self, network: _Optional[_Union[Network, str]] = ..., partition_index: _Optional[int] = ..., tensor: _Optional[bytes] = ...) -> None: ...
 
 class SplitResponse(_message.Message):
     __slots__ = ["classes", "server_time"]

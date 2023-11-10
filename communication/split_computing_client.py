@@ -1,24 +1,26 @@
 import logging
 import time
+from statistics import median
 
 import grpc
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
-from keras.applications import resnet50
+from keras.applications import vgg16
+from tqdm import tqdm
 
 from communication import service_pb2_grpc, service_pb2
 
 path_prefix = {service_pb2.VGG16: "VGG16",
                service_pb2.RESNET50: "resnet50",
                service_pb2.MOBILENETV2: "mobilenetv2"}
+MAX_MESSAGE_LENGTH = 12845090
 
 
 def normalize_img(img, lbl):
     """Normalizes images: `uint8` -> `float32`."""
     img = tf.image.resize_with_pad(img, 224, 224)
-    # todo change!!
-    img = resnet50.preprocess_input(img)
+    img = vgg16.preprocess_input(img)
     return img, lbl
 
 
@@ -50,23 +52,21 @@ def split_compute(stub, image, network, partition_index, quantized_tail):
     start_network_time = time.perf_counter_ns()
     resp = stub.SplitCompute(service_pb2.SplitRequest(network=network,
                                                       partition_index=partition_index,
-                                                      tensor=serialized_tensor,
-                                                      quantized_tail=quantized_tail))
+                                                      tensor=serialized_tensor))
     end_network_time = time.perf_counter_ns()
     network_time = end_network_time - start_network_time
-    print("Classes:", resp.classes, "calculated in")
-    print("Split at", partition_index)
-    print("Client time", (end_counter_ns - start_counter_ns) / 1000000, "ms")
-    print("Server time:", resp.server_time / 1000000, "ms")
-    print("Network time:", (network_time - resp.server_time) / 1000000, "ms")
-    return resp.classes, resp.server_time
+    return resp.classes, resp.server_time, network_time
 
 
 def run():
     # NOTE(gRPC Python Team): .close() is possible on a channel and should be
     # used in circumstances in which the with statement does not fit the needs
     # of the code.
-    with grpc.insecure_channel("localhost:50051") as channel:
+    with grpc.insecure_channel("localhost:50051", [
+        ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
+        ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
+    ]) as channel:
+
         stub = service_pb2_grpc.SplitServiceStub(channel)
         validation_ds, metadata = tfds.load(
             'imagenet2012',
@@ -74,13 +74,44 @@ def run():
             with_info=True,
             as_supervised=True,
         )
-        validation_ds = validation_ds.map(normalize_img, num_parallel_calls=tf.data.AUTOTUNE)
+        validation_ds = validation_ds.map(normalize_img, num_parallel_calls=tf.data.AUTOTUNE).skip(100)
         get_label_name = metadata.features['label'].int2str
-        it = iter(validation_ds)
-        for _ in range(8):
-            image, label = next(it)
-        print("Predicting label", get_label_name(label))
-        split_compute(stub, image, service_pb2.RESNET50, 6, True)
+        num_images = 100
+
+        for i in (range(1, 22)):
+            print("Split at layer", i)
+            it = iter(validation_ds)
+            top1 = 0
+            top5 = 0
+            times = []
+
+            for _ in range(num_images):
+                image, label = next(it)
+                pred_classes, serv_times, _ = split_compute(stub, image, service_pb2.VGG16, i, True)
+                times.append(serv_times)
+                if get_label_name(label) in pred_classes:
+                    top5 += 1
+                if get_label_name(label) == pred_classes[0]:
+                    top1 += 1
+            print("Quantized:")
+            print("top1 acc:\t" + str(top1 / num_images) + "\t\ttop5 acc:\t" + str(
+                top5 / num_images) + "\t\tmedian server time:\t" + str(median(times) / 1000000) + " ms")
+
+            it = iter(validation_ds)
+            top1 = 0
+            top5 = 0
+            times = []
+            for _ in range(num_images):
+                image, label = next(it)
+                pred_classes, serv_times, _ = split_compute(stub, image, service_pb2.VGG16, i, False)
+                times.append(serv_times)
+                if get_label_name(label) in pred_classes:
+                    top5 += 1
+                if get_label_name(label) == pred_classes[0]:
+                    top1 += 1
+            print("Unquantized:")
+            print("top1 acc:\t" + str(top1 / num_images) + "\t\ttop5 acc:\t" + str(
+                top5 / num_images) + "\t\tmedian server time:\t" + str(median(times) / 1000000) + " ms")
 
 
 if __name__ == "__main__":

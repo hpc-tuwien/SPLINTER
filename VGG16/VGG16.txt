@@ -1,0 +1,119 @@
+Split at layer 1
+Quantized:
+top1 acc:	0.58		top5 acc:	0.83		median server time:	481.15735 ms
+Unquantized:
+top1 acc:	0.6		top5 acc:	0.83		median server time:	855.158 ms
+
+Split at layer 2
+Quantized:
+top1 acc:	0.59		top5 acc:	0.82		median server time:	404.1105 ms
+Unquantized:
+top1 acc:	0.59		top5 acc:	0.83		median server time:	709.0601 ms
+
+Split at layer 3
+Quantized:
+top1 acc:	0.59		top5 acc:	0.81		median server time:	369.65975 ms
+Unquantized:
+top1 acc:	0.59		top5 acc:	0.81		median server time:	725.9586 ms
+
+Split at layer 4
+Quantized:
+top1 acc:	0.6		top5 acc:	0.81		median server time:	378.21975 ms
+Unquantized:
+top1 acc:	0.61		top5 acc:	0.82		median server time:	695.77765 ms
+
+Split at layer 5
+Quantized:
+top1 acc:	0.63		top5 acc:	0.82		median server time:	313.30095 ms
+Unquantized:
+top1 acc:	0.62		top5 acc:	0.83		median server time:	627.4858 ms
+
+Split at layer 6
+Quantized:
+top1 acc:	0.59		top5 acc:	0.82		median server time:	301.5764 ms
+Unquantized:
+top1 acc:	0.6		top5 acc:	0.82		median server time:	638.06465 ms
+
+Split at layer 7
+Quantized:
+top1 acc:	0.59		top5 acc:	0.83		median server time:	309.28285 ms
+Unquantized:
+top1 acc:	0.6		top5 acc:	0.82		median server time:	689.8127 ms
+
+Split at layer 8
+Quantized:
+top1 acc:	0.59		top5 acc:	0.81		median server time:	254.9383 ms
+Unquantized:
+top1 acc:	0.6		top5 acc:	0.83		median server time:	510.6187 ms
+
+Split at layer 9
+Quantized:
+top1 acc:	0.59		top5 acc:	0.84		median server time:	183.2022 ms
+Unquantized:
+top1 acc:	0.6		top5 acc:	0.83		median server time:	418.1906 ms
+
+Split at layer 10
+Quantized:
+top1 acc:	0.59		top5 acc:	0.84		median server time:	170.09095 ms
+Unquantized:
+top1 acc:	0.6		top5 acc:	0.83		median server time:	394.5342 ms
+
+Split at layer 11
+Quantized:
+top1 acc:	0.59		top5 acc:	0.84		median server time:	156.74065 ms
+Unquantized:
+top1 acc:	0.6		top5 acc:	0.84		median server time:	352.6802 ms
+
+Split at layer 12
+Quantized:
+top1 acc:	0.58		top5 acc:	0.81		median server time:	95.54955 ms
+Unquantized:
+top1 acc:	0.59		top5 acc:	0.82		median server time:	226.3029 ms
+
+Split at layer 13
+Quantized:
+top1 acc:	0.59		top5 acc:	0.83		median server time:	48.46325 ms
+Unquantized:
+top1 acc:	0.6		top5 acc:	0.84		median server time:	117.16725 ms
+
+Split at layer 14
+Quantized:
+top1 acc:	0.61		top5 acc:	0.83		median server time:	43.05355 ms
+Unquantized:
+top1 acc:	0.6		top5 acc:	0.85		median server time:	107.3857 ms
+
+Split at layer 15
+Quantized:
+top1 acc:	0.6		top5 acc:	0.81		median server time:	31.16615 ms
+Unquantized:
+top1 acc:	0.59		top5 acc:	0.84		median server time:	79.48305 ms
+
+Split at layer 16
+Quantized:
+top1 acc:	0.58		top5 acc:	0.82		median server time:	20.80295 ms
+Unquantized:
+top1 acc:	0.59		top5 acc:	0.82		median server time:	58.89415 ms
+
+Split at layer 17
+Quantized:
+top1 acc:	0.58		top5 acc:	0.83		median server time:	10.0521 ms
+Unquantized:
+top1 acc:	0.58		top5 acc:	0.84		median server time:	36.77775 ms
+
+Split at layer 18
+Quantized:
+top1 acc:	0.58		top5 acc:	0.8		median server time:	10.68105 ms
+Unquantized:
+top1 acc:	0.59		top5 acc:	0.81		median server time:	31.9942 ms
+
+Split at layer 19
+Quantized:
+top1 acc:	0.58		top5 acc:	0.8		median server time:	10.80395 ms
+Unquantized:
+top1 acc:	0.59		top5 acc:	0.81		median server time:	31.74875 ms
+
+Split at layer 20
+Quantized:
+top1 acc:	0.59		top5 acc:	0.83		median server time:	2.0901 ms
+Unquantized:
+top1 acc:	0.59		top5 acc:	0.84		median server time:	5.2567 ms

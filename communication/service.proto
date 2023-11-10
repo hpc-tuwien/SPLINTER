@@ -14,7 +14,6 @@ message SplitRequest {
   Network network = 1;
   int32 partition_index = 2;
   bytes tensor = 3;
-  bool quantized_tail = 4;
 }
 
 message SplitResponse {

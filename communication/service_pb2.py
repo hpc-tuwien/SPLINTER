@@ -13,19 +13,19 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rservice.proto\"j\n\x0cSplitRequest\x12\x19\n\x07network\x18\x01 \x01(\x0e\x32\x08.Network\x12\x17\n\x0fpartition_index\x18\x02 \x01(\x05\x12\x0e\n\x06tensor\x18\x03 \x01(\x0c\x12\x16\n\x0equantized_tail\x18\x04 \x01(\x08\"5\n\rSplitResponse\x12\x0f\n\x07\x63lasses\x18\x01 \x03(\t\x12\x13\n\x0bserver_time\x18\x02 \x01(\x05*3\n\x07Network\x12\t\n\x05VGG16\x10\x00\x12\x0c\n\x08RESNET50\x10\x01\x12\x0f\n\x0bMOBILENETV2\x10\x02\x32=\n\x0cSplitService\x12-\n\x0cSplitCompute\x12\r.SplitRequest\x1a\x0e.SplitResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rservice.proto\"R\n\x0cSplitRequest\x12\x19\n\x07network\x18\x01 \x01(\x0e\x32\x08.Network\x12\x17\n\x0fpartition_index\x18\x02 \x01(\x05\x12\x0e\n\x06tensor\x18\x03 \x01(\x0c\"5\n\rSplitResponse\x12\x0f\n\x07\x63lasses\x18\x01 \x03(\t\x12\x13\n\x0bserver_time\x18\x02 \x01(\x05*3\n\x07Network\x12\t\n\x05VGG16\x10\x00\x12\x0c\n\x08RESNET50\x10\x01\x12\x0f\n\x0bMOBILENETV2\x10\x02\x32=\n\x0cSplitService\x12-\n\x0cSplitCompute\x12\r.SplitRequest\x1a\x0e.SplitResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'service_pb2', _globals)
 if _descriptor._USE_C_DESCRIPTORS == False:
   DESCRIPTOR._options = None
-  _globals['_NETWORK']._serialized_start=180
-  _globals['_NETWORK']._serialized_end=231
+  _globals['_NETWORK']._serialized_start=156
+  _globals['_NETWORK']._serialized_end=207
   _globals['_SPLITREQUEST']._serialized_start=17
-  _globals['_SPLITREQUEST']._serialized_end=123
-  _globals['_SPLITRESPONSE']._serialized_start=125
-  _globals['_SPLITRESPONSE']._serialized_end=178
-  _globals['_SPLITSERVICE']._serialized_start=233
-  _globals['_SPLITSERVICE']._serialized_end=294
+  _globals['_SPLITREQUEST']._serialized_end=99
+  _globals['_SPLITRESPONSE']._serialized_start=101
+  _globals['_SPLITRESPONSE']._serialized_end=154
+  _globals['_SPLITSERVICE']._serialized_start=209
+  _globals['_SPLITSERVICE']._serialized_end=270
 # @@protoc_insertion_point(module_scope)
