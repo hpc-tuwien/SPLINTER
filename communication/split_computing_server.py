@@ -1,4 +1,3 @@
-import logging
 import time
 from concurrent import futures
 
@@ -11,7 +10,7 @@ from keras.applications import vgg16
 import service_pb2
 import service_pb2_grpc
 
-path_network = {service_pb2.VGG16: "VGG16",
+PATH_NETWORK = {service_pb2.VGG16: "VGG16",
                 service_pb2.RESNET50: "resnet50",
                 service_pb2.MOBILENETV2: "mobilenetv2"}
 
@@ -37,7 +36,7 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
             self.network = request.network
             self.partition_index = request.partition_index
             self.tail = tf.lite.Interpreter(
-                model_path="../" + path_network[self.network] + "/models/tail/" + str(
+                model_path="../" + PATH_NETWORK[self.network] + "/models/tail/" + str(
                     self.partition_index) + ".tflite")
             self.tail.allocate_tensors()
             # Get input and output tensors from tail network and convert tensor.
@@ -70,9 +69,9 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
 
 
 def serve():
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1), options=
-    [('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
-     ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH)])
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1),
+                         options=[('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
+                                  ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH)])
     service_pb2_grpc.add_SplitServiceServicer_to_server(SplitServiceServicer(), server)
     server.add_insecure_port("[::]:50051")
     server.start()
@@ -80,5 +79,4 @@ def serve():
 
 
 if __name__ == "__main__":
-    logging.basicConfig()
     serve()
