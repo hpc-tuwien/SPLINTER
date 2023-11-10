@@ -147,6 +147,7 @@ def run():
             with_info=True,
             as_supervised=True,
         )
+        # TODO maybe better sampling?
         get_label_name = metadata.features['label'].int2str
 
         # preprocess according to network; and skip images used for quantization
@@ -177,7 +178,7 @@ def run():
             top5.append(top5_cnt / num_images)
         accuracies['top1'] = top1
         accuracies['top5'] = top5
-        accuracies.to_csv("VGG16_CPU_accuracies.csv")
+        accuracies.to_csv("VGG16_CPU_accuracies.csv", index=False)
         # TODO write timings into file!
 
 
