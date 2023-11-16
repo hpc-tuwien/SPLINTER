@@ -18,5 +18,6 @@ message SplitRequest {
 
 message SplitResponse {
   repeated string classes = 1;
-  int32 server_time = 2;
+  // 32 bit yields max 4 seconds
+  uint64 server_time = 2;
 }
