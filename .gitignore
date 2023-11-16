@@ -3,3 +3,4 @@
 */models/*
 VGG16/__pycache__/
 resnet50/__pycache__/
+communication/__pycache__/
