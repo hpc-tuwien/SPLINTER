@@ -12,8 +12,10 @@ enum Network {
 
 message SplitRequest {
   Network network = 1;
-  int32 partition_index = 2;
+  uint32 partition_index = 2;
   bytes tensor = 3;
+  optional sint32 zero_point = 4;
+  optional float scale = 5;
 }
 
 message SplitResponse {

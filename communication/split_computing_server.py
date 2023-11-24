@@ -14,7 +14,7 @@ PATH_NETWORK = {service_pb2.VGG16: "VGG16",
                 service_pb2.RESNET50: "resnet50",
                 service_pb2.MOBILENETV2: "mobilenetv2"}
 
-MAX_MESSAGE_LENGTH = 12845090
+MAX_MESSAGE_LENGTH = 100
 
 
 class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
@@ -23,35 +23,38 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
         self.network = None
         self.partition_index = None
         self.tail = None
-        self.input_details = None
-        self.output_details = None
-        self.input_scale = None
-        self.input_zero_point = None
 
     def SplitCompute(self, request, context):
-        start_counter_ns = time.perf_counter_ns()
-        if (request.network == self.network) and (request.partition_index == self.partition_index):
-            pass
-        else:
+        start_server_time = time.perf_counter_ns()
+        # load tail network
+        if (request.network != self.network) or (request.partition_index != self.partition_index):
             self.network = request.network
             self.partition_index = request.partition_index
             self.tail = tf.lite.Interpreter(
                 model_path="../" + PATH_NETWORK[self.network] + "/models/tail/" + str(
                     self.partition_index) + ".tflite")
             self.tail.allocate_tensors()
-            # Get input and output tensors from tail network and convert tensor.
-            self.input_details = self.tail.get_input_details()[0]
-            self.output_details = self.tail.get_output_details()[0]
-            self.input_scale, self.input_zero_point = self.input_details["quantization"]
 
-        intermediate_float = tf.io.parse_tensor(request.tensor, out_type=tf.float32).numpy()
-        intermediate_int = (intermediate_float / self.input_scale + self.input_zero_point).astype(
-            self.input_details["dtype"])
+        # rescale to 32bit float if head network was involved
+        if self.partition_index != 0:
+            # TODO check if numpy call neccesary
+            tensor = tf.io.parse_tensor(request.tensor, out_type=tf.int8).numpy()
+            intermediate_float = ((tensor - request.zero_point) * request.scale).astype("float32")
+        else:
+            # TODO check if numpy call neccesary
+            intermediate_float = tf.io.parse_tensor(request.tensor, out_type=tf.float32).numpy()
 
+        # scale tensor for tail network
+        input_details = self.tail.get_input_details()[0]
+        input_scale = input_details["quantization_parameters"]["scales"][0]
+        input_zero_point = input_details["quantization_parameters"]["zero_points"][0]
+
+        intermediate_int = (intermediate_float / input_scale + input_zero_point).astype(input_details["dtype"])
         # invoke tail network
-        self.tail.set_tensor(self.input_details["index"], intermediate_int)
+        self.tail.set_tensor(input_details["index"], intermediate_int)
         self.tail.invoke()
-        output_data = self.tail.get_tensor(self.output_details['index'])
+        output_details = self.tail.get_output_details()[0]
+        output_data = self.tail.get_tensor(output_details['index'])
 
         if self.network == service_pb2.VGG16:
             classes = [label_id for label_id, _, _ in vgg16.decode_predictions(output_data, top=5)[0]]
@@ -60,11 +63,11 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
         elif self.network == service_pb2.MOBILENETV2:
             classes = [label_id for label_id, _, _ in mobilenet_v2.decode_predictions(output_data, top=5)[0]]
 
-        end_counter_ns = time.perf_counter_ns()
+        end_server_time = time.perf_counter_ns()
 
         return service_pb2.SplitResponse(
             classes=classes,
-            server_time=end_counter_ns - start_counter_ns
+            server_time=end_server_time - start_server_time
         )
 
 

@@ -23,7 +23,7 @@ LOCAL_COMPUTE_IDX = {
     service_pb2.RESNET50: 40,
     service_pb2.MOBILENETV2: 75
 }
-MAX_MESSAGE_LENGTH = 12845090
+MAX_MESSAGE_LENGTH = 100
 
 
 def normalize_img_vgg16(img, lbl):
@@ -50,95 +50,86 @@ class SplitComputeClient:
         self.head = None
         self.network = None
         self.partition_index = None
-        self.input_details = None
-        self.output_details = None
-        self.input_scale = None
-        self.input_zero_point = None
-        self.output_scale = None
-        self.output_zero_point = None
         self.accelerator = None
 
-    def split_compute(self, stub, image, network, partition_index, accelerator):
-        start_counter_ns = time.perf_counter_ns()
-
-        # check if there is any local computation
-        if partition_index == 0:
+    def load_head_network(self):
+        # cloud computing
+        if self.partition_index == 0:
             self.head = None
+        else:
+            if self.accelerator:
+                self.head = tflite.Interpreter(
+                    model_path="../" + PATH_PREFIX[self.network] + "/models/head/" + str(
+                        self.partition_index) + "_edgetpu.tflite",
+                    experimental_delegates=[tflite.load_delegate('libedgetpu.so.1')])
+            else:
+                self.head = tf.lite.Interpreter(
+                    model_path="../" + PATH_PREFIX[self.network] + "/models/head/" + str(
+                        self.partition_index) + ".tflite")
+            self.head.allocate_tensors()
+
+    def split_compute(self, stub, image, network, partition_index, accelerator):
+        start_client_time = time.perf_counter_ns()
+        # load head network
+        if (network != self.network) or (partition_index != self.partition_index) or (accelerator != self.accelerator):
             self.network = network
             self.partition_index = partition_index
-            self.input_details = None
-            self.output_details = None
-            self.input_scale = None
-            self.input_zero_point = None
-            self.output_scale = None
-            self.output_zero_point = None
             self.accelerator = accelerator
-            intermediate = image
+            self.load_head_network()
+
+        # cloud only computing
+        if partition_index == 0:
+            intermediate = np.expand_dims(image, axis=0)
         else:
-            if (network == self.network) and (partition_index == self.partition_index) and (
-                    self.accelerator == accelerator):
-                pass
-            else:
-                self.network = network
-                self.partition_index = partition_index
-                self.accelerator = accelerator
-                if self.accelerator:
-                    self.head = tflite.Interpreter(
-                        model_path="../" + PATH_PREFIX[network] + "/models/head/" + str(
-                            partition_index) + "_edgetpu.tflite",
-                        experimental_delegates=[tflite.load_delegate('libedgetpu.so.1')])
-                else:
-                    self.head = tf.lite.Interpreter(
-                        model_path="../" + PATH_PREFIX[network] + "/models/head/" + str(partition_index) + ".tflite")
-                self.head.allocate_tensors()
-
-                # Get input and output tensors from head network.
-                self.input_details = self.head.get_input_details()[0]
-                self.output_details = self.head.get_output_details()[0]
-
-                self.input_scale, self.input_zero_point = self.input_details["quantization"]
-                self.output_scale, self.output_zero_point = self.output_details["quantization"]
-
-            # convert image
-            scaled_image = image / self.input_scale + self.input_zero_point
-            batch_int = np.expand_dims(scaled_image, axis=0).astype(self.input_details["dtype"])
+            # scale input for head network
+            input_details = self.head.get_input_details()[0]
+            input_scale = input_details["quantization_parameters"]["scales"][0]
+            input_zero_point = input_details["quantization_parameters"]["zero_points"][0]
+            scaled_image = image / input_scale + input_zero_point
+            batch_int = np.expand_dims(scaled_image, axis=0).astype(input_details["dtype"])
 
             # invoke head network
-            self.head.set_tensor(self.input_details["index"], batch_int)
+            self.head.set_tensor(input_details["index"], batch_int)
+            output_details = self.head.get_output_details()[0]
             self.head.invoke()
-            intermediate = self.head.get_tensor(self.output_details['index'])
+            intermediate = self.head.get_tensor(output_details['index'])
 
-        # decode predictions if local only computation
-        if partition_index == LOCAL_COMPUTE_IDX[self.network]:
-            if self.network == service_pb2.VGG16:
-                classes = [label_id for label_id, _, _ in vgg16.decode_predictions(intermediate, top=5)[0]]
-            elif self.network == service_pb2.RESNET50:
-                classes = [label_id for label_id, _, _ in resnet50.decode_predictions(intermediate, top=5)[0]]
-            elif self.network == service_pb2.MOBILENETV2:
-                classes = [label_id for label_id, _, _ in mobilenet_v2.decode_predictions(intermediate, top=5)[0]]
-            end_counter_ns = time.perf_counter_ns()
-            network_time = 0
-            server_time = 0
-        else:
-            if self.partition_index == 0:
-                intermediate_scaled = np.expand_dims(intermediate, axis=0)
-            else:
-                # rescale tensor
-                intermediate_scaled = ((intermediate - self.output_zero_point) * self.output_scale).astype("float32")
-            serialized_tensor = tf.io.serialize_tensor(intermediate_scaled).numpy()
-            end_counter_ns = time.perf_counter_ns()
-            start_network_time = time.perf_counter_ns()
-            resp = stub.SplitCompute(service_pb2.SplitRequest(network=self.network,
-                                                              partition_index=self.partition_index,
-                                                              tensor=serialized_tensor))
-            end_network_time = time.perf_counter_ns()
-            classes = resp.classes
-            server_time = resp.server_time
-            network_time = end_network_time - start_network_time
-            network_time = network_time - server_time
-        client_time = end_counter_ns - start_counter_ns
+            # edge only computation
+            if self.partition_index == LOCAL_COMPUTE_IDX[self.network]:
+                if self.network == service_pb2.VGG16:
+                    classes = [label_id for label_id, _, _ in vgg16.decode_predictions(intermediate, top=5)[0]]
+                elif self.network == service_pb2.RESNET50:
+                    classes = [label_id for label_id, _, _ in resnet50.decode_predictions(intermediate, top=5)[0]]
+                elif self.network == service_pb2.MOBILENETV2:
+                    classes = [label_id for label_id, _, _ in mobilenet_v2.decode_predictions(intermediate, top=5)[0]]
+                end_client_time = time.perf_counter_ns()
+                client_time = end_client_time - start_client_time
+                network_time = 0
+                server_time = 0
+                total_time = client_time + server_time + network_time
+                return classes, client_time / 1000000, server_time / 1000000, network_time / 1000000, total_time / 1000000
+
+        # send to cloud
+        # TODO check if numyp call necesary
+        serialized_tensor = tf.io.serialize_tensor(intermediate).numpy()
+        req = service_pb2.SplitRequest(network=self.network,
+                                       partition_index=self.partition_index,
+                                       tensor=serialized_tensor)
+        # set scaling if there was a head network
+        if partition_index != 0:
+            output_details = self.head.get_output_details()[0]
+            req.scale = output_details["quantization_parameters"]["scales"][0]
+            req.zero_point = output_details["quantization_parameters"]["zero_points"][0]
+        end_client_time = time.perf_counter_ns()
+        start_network_time = time.perf_counter_ns()
+        resp = stub.SplitCompute(req)
+        end_network_time = time.perf_counter_ns()
+        network_time = end_network_time - start_network_time
+        server_time = resp.server_time
+        network_time = network_time - server_time
+        client_time = end_client_time - start_client_time
         total_time = client_time + server_time + network_time
-        return classes, client_time / 1000000, server_time / 1000000, network_time / 1000000, total_time / 1000000
+        return resp.classes, client_time / 1000000, server_time / 1000000, network_time / 1000000, total_time / 1000000
 
 
 def run(num_images, network_arg, accelerator):
