@@ -14,7 +14,7 @@ PATH_NETWORK = {service_pb2.VGG16: "VGG16",
                 service_pb2.RESNET50: "resnet50",
                 service_pb2.MOBILENETV2: "mobilenetv2"}
 
-MAX_MESSAGE_LENGTH = 100
+MAX_MESSAGE_LENGTH = 3211306
 
 
 class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
@@ -37,12 +37,10 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
 
         # rescale to 32bit float if head network was involved
         if self.partition_index != 0:
-            # TODO check if numpy call neccesary
-            tensor = tf.io.parse_tensor(request.tensor, out_type=tf.int8).numpy()
+            tensor = tf.io.parse_tensor(request.tensor, out_type=tf.int8)
             intermediate_float = ((tensor - request.zero_point) * request.scale).astype("float32")
         else:
-            # TODO check if numpy call neccesary
-            intermediate_float = tf.io.parse_tensor(request.tensor, out_type=tf.float32).numpy()
+            intermediate_float = tf.io.parse_tensor(request.tensor, out_type=tf.float32)
 
         # scale tensor for tail network
         input_details = self.tail.get_input_details()[0]

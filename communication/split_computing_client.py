@@ -23,7 +23,7 @@ LOCAL_COMPUTE_IDX = {
     service_pb2.RESNET50: 40,
     service_pb2.MOBILENETV2: 75
 }
-MAX_MESSAGE_LENGTH = 100
+MAX_MESSAGE_LENGTH = 3211306
 
 
 def normalize_img_vgg16(img, lbl):
@@ -110,7 +110,6 @@ class SplitComputeClient:
                 return classes, client_time / 1000000, server_time / 1000000, network_time / 1000000, total_time / 1000000
 
         # send to cloud
-        # TODO check if numyp call necesary
         serialized_tensor = tf.io.serialize_tensor(intermediate).numpy()
         req = service_pb2.SplitRequest(network=self.network,
                                        partition_index=self.partition_index,
