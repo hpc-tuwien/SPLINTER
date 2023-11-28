@@ -37,10 +37,10 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
 
         # rescale to 32bit float if head network was involved
         if self.partition_index != 0:
-            tensor = tf.io.parse_tensor(request.tensor, out_type=tf.int8)
+            tensor = tf.io.parse_tensor(request.tensor, out_type=tf.int8).numpy()
             intermediate_float = ((tensor - request.zero_point) * request.scale).astype("float32")
         else:
-            intermediate_float = tf.io.parse_tensor(request.tensor, out_type=tf.float32)
+            intermediate_float = tf.io.parse_tensor(request.tensor, out_type=tf.float32).numpy()
 
         # scale tensor for tail network
         input_details = self.tail.get_input_details()[0]
