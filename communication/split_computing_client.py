@@ -63,7 +63,7 @@ class SplitComputeClient:
                         self.partition_index) + "_edgetpu.tflite",
                     experimental_delegates=[tflite.load_delegate('libedgetpu.so.1')])
             else:
-                self.head = tf.lite.Interpreter(
+                self.head = tflite.Interpreter(
                     model_path="../" + PATH_PREFIX[self.network] + "/models/head/" + str(
                         self.partition_index) + ".tflite")
             self.head.allocate_tensors()
