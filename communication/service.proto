@@ -16,6 +16,7 @@ message SplitRequest {
   bytes tensor = 3;
   optional sint32 zero_point = 4;
   optional float scale = 5;
+  bool accelerator = 6;
 }
 
 message SplitResponse {
