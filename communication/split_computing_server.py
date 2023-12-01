@@ -2,6 +2,7 @@ import time
 from concurrent import futures
 
 import grpc
+import keras.models
 import tensorflow as tf
 from keras.applications import mobilenet_v2
 from keras.applications import resnet50
@@ -30,36 +31,25 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
         if (request.network != self.network) or (request.partition_index != self.partition_index):
             self.network = request.network
             self.partition_index = request.partition_index
-            self.tail = tf.lite.Interpreter(
-                model_path="../" + PATH_NETWORK[self.network] + "/models/tail/" + str(
-                    self.partition_index) + ".tflite")
-            self.tail.allocate_tensors()
+            self.tail = keras.models.load_model(
+                "../" + PATH_NETWORK[self.network] + "/models/tail/" + str(self.partition_index) + ".keras")
 
         # rescale to 32bit float if head network was involved
         if self.partition_index != 0:
-            tensor = tf.io.parse_tensor(request.tensor, out_type=tf.int8).numpy()
-            intermediate_float = ((tensor - request.zero_point) * request.scale).astype("float32")
+            tensor = tf.cast(tf.io.parse_tensor(request.tensor, out_type=tf.int8), tf.float32)
+            intermediate_float = ((tensor - request.zero_point) * request.scale)
         else:
-            intermediate_float = tf.io.parse_tensor(request.tensor, out_type=tf.float32).numpy()
+            intermediate_float = tf.io.parse_tensor(request.tensor, out_type=tf.float32)
 
-        # scale tensor for tail network
-        input_details = self.tail.get_input_details()[0]
-        input_scale = input_details["quantization_parameters"]["scales"][0]
-        input_zero_point = input_details["quantization_parameters"]["zero_points"][0]
-
-        intermediate_int = (intermediate_float / input_scale + input_zero_point).astype(input_details["dtype"])
         # invoke tail network
-        self.tail.set_tensor(input_details["index"], intermediate_int)
-        self.tail.invoke()
-        output_details = self.tail.get_output_details()[0]
-        output_data = self.tail.get_tensor(output_details['index'])
+        preds = self.tail.predict(intermediate_float, verbose=0)
 
         if self.network == service_pb2.VGG16:
-            classes = [label_id for label_id, _, _ in vgg16.decode_predictions(output_data, top=5)[0]]
+            classes = [label_id for label_id, _, _ in vgg16.decode_predictions(preds, top=5)[0]]
         elif self.network == service_pb2.RESNET50:
-            classes = [label_id for label_id, _, _ in resnet50.decode_predictions(output_data, top=5)[0]]
+            classes = [label_id for label_id, _, _ in resnet50.decode_predictions(preds, top=5)[0]]
         elif self.network == service_pb2.MOBILENETV2:
-            classes = [label_id for label_id, _, _ in mobilenet_v2.decode_predictions(output_data, top=5)[0]]
+            classes = [label_id for label_id, _, _ in mobilenet_v2.decode_predictions(preds, top=5)[0]]
 
         end_server_time = time.perf_counter_ns()
 
