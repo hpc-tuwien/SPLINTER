@@ -1,4 +1,3 @@
-import argparse
 import subprocess
 import time
 
@@ -24,7 +23,7 @@ def plug_in_tpu():
             raise Exception("Could not plug in TPU.")
 
 
-def run(tpu_mode: str, cpu_frequency: str):
+def setup_hardware(tpu_mode: str, cpu_frequency: str):
     # CPU settings
     console_output = subprocess.run(['cpufreq-info', '-p'], stdout=subprocess.PIPE).stdout.decode('utf-8')
     # set userspace governor to allow direct setting of CPU frequency
@@ -60,19 +59,3 @@ def run(tpu_mode: str, cpu_frequency: str):
             plug_in_tpu()
         else:
             plug_in_tpu()
-
-
-def read_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-t', '--tpu_mode', type=str, choices=['off', 'std', 'max'], default='std',
-                        help='The TPU mode to be used.')
-    # from 600 MHz to 1800 MHz in 200 MHz steps
-    parser.add_argument('-c', '--cpu_frequency', type=str, choices=[str(x) for x in range(600, 2000, 200)],
-                        default='1500', help='The CPU frequency in MHz to be used.')
-
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    args = read_args()
-    run(args.tpu_mode, args.cpu_frequency)

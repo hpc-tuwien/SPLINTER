@@ -14,6 +14,7 @@ from keras.applications import vgg16
 from tqdm import tqdm
 
 from communication import service_pb2_grpc, service_pb2
+from communication.hardware import setup_hardware
 
 PATH_PREFIX = {service_pb2.VGG16: "VGG16",
                service_pb2.RESNET50: "resnet50",
@@ -23,7 +24,7 @@ LOCAL_COMPUTE_IDX = {
     service_pb2.RESNET50: 40,
     service_pb2.MOBILENETV2: 75
 }
-MAX_MESSAGE_LENGTH = 3211306
+MAX_MESSAGE_LENGTH = 3211308
 
 
 def normalize_img_vgg16(img, lbl):
@@ -68,7 +69,7 @@ class SplitComputeClient:
                         self.partition_index) + ".tflite")
             self.head.allocate_tensors()
 
-    def split_compute(self, stub, image, network, partition_index, accelerator):
+    def split_compute(self, stub, image, network, partition_index, accelerator, cloud_accelerator):
         start_client_time = time.perf_counter_ns()
         # load head network
         if (network != self.network) or (partition_index != self.partition_index) or (accelerator != self.accelerator):
@@ -113,7 +114,8 @@ class SplitComputeClient:
         serialized_tensor = tf.io.serialize_tensor(intermediate).numpy()
         req = service_pb2.SplitRequest(network=self.network,
                                        partition_index=self.partition_index,
-                                       tensor=serialized_tensor)
+                                       tensor=serialized_tensor,
+                                       accelerator=cloud_accelerator)
         # set scaling if there was a head network
         if partition_index != 0:
             output_details = self.head.get_output_details()[0]
@@ -131,7 +133,7 @@ class SplitComputeClient:
         return resp.classes, client_time / 1000000, server_time / 1000000, network_time / 1000000, total_time / 1000000
 
 
-def run(num_images, network_arg, accelerator):
+def run(num_images, network_arg, accelerator, cloud_accelerator):
     # NOTE(gRPC Python Team): .close() is possible on a channel and should be
     # used in circumstances in which the with statement does not fit the needs
     # of the code.
@@ -199,7 +201,8 @@ def run(num_images, network_arg, accelerator):
                 pred_classes, client_time, server_time, network_time, total_time = client.split_compute(stub, image,
                                                                                                         network,
                                                                                                         partition_index,
-                                                                                                        accelerator)
+                                                                                                        accelerator,
+                                                                                                        cloud_accelerator)
                 layer.append(partition_index)
                 img.append(img_num)
                 client_timings.append(client_time)
@@ -231,15 +234,23 @@ def run(num_images, network_arg, accelerator):
 
 def read_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-a', '--accelerator', action=argparse.BooleanOptionalAction, help='Use TPU instead of CPU.',
+    parser.add_argument('-g', '--cloud_gpu', action=argparse.BooleanOptionalAction, help='Use cloud accelerator (GPU).',
                         default=False)
     parser.add_argument('-n', '--network', type=str, choices=['vgg16', 'resnet50', 'mobilenetv2'], default='vgg16',
                         help='The network to be used.')
     parser.add_argument('-s', '--n_samples', type=int, default=100, help='The number of samples to average over.')
+    parser.add_argument('-t', '--tpu_mode', type=str, choices=['off', 'std', 'max'], default='std',
+                        help='The TPU mode to be used.')
+    # from 600 MHz to 1800 MHz in 200 MHz steps
+    parser.add_argument('-c', '--cpu_frequency', type=str, choices=[str(x) for x in range(600, 2000, 200)],
+                        default='1500', help='The CPU frequency in MHz to be used.')
 
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = read_args()
-    run(args.n_samples, args.network, args.accelerator)
+    print("Setting up hardware ...")
+    setup_hardware(args.tpu_mode, args.cpu_frequency)
+    print("Starting experiment.")
+    run(args.n_samples, args.network, args.tpu_mode != 'off', args.cloud_gpu)
