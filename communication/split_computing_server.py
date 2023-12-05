@@ -1,3 +1,4 @@
+import argparse
 import time
 import warnings
 from concurrent import futures
@@ -66,15 +67,22 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
             )
 
 
-def serve():
+def serve(port: int):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1),
                          options=[('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
                                   ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH)])
     service_pb2_grpc.add_SplitServiceServicer_to_server(SplitServiceServicer(), server)
-    server.add_insecure_port("[::]:50051")
+    server.add_insecure_port("[::]:" + str(port))
     server.start()
     server.wait_for_termination()
 
 
+def read_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-p', '--port', type=int, default=50051, help='The port to listen on.')
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    serve()
+    args = read_args()
+    serve(args.port)

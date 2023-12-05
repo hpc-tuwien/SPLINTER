@@ -133,11 +133,11 @@ class SplitComputeClient:
         return resp.classes, client_time / 1000000, server_time / 1000000, network_time / 1000000, total_time / 1000000
 
 
-def run(num_images, network_arg, accelerator, cloud_accelerator):
+def run(num_images: int, network_arg, accelerator: bool, cloud_accelerator: bool, host: str, port: int):
     # NOTE(gRPC Python Team): .close() is possible on a channel and should be
     # used in circumstances in which the with statement does not fit the needs
     # of the code.
-    with grpc.insecure_channel("192.168.167.81:50051", [
+    with grpc.insecure_channel(host + ":" + str(port), [
         ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
         ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
     ]) as channel:
@@ -241,6 +241,8 @@ def read_args() -> argparse.Namespace:
     parser.add_argument('-s', '--n_samples', type=int, default=100, help='The number of samples to average over.')
     parser.add_argument('-t', '--tpu_mode', type=str, choices=['off', 'std', 'max'], default='std',
                         help='The TPU mode to be used.')
+    parser.add_argument('-p', '--port', type=int, default=50051, help='The port to connect to.')
+    parser.add_argument('-i', '--ip', type=str, default='192.168.167.81', help='The server IP address to connect to.')
     # from 600 MHz to 1800 MHz in 200 MHz steps
     parser.add_argument('-c', '--cpu_frequency', type=str, choices=[str(x) for x in range(600, 2000, 200)],
                         default='1500', help='The CPU frequency in MHz to be used.')
@@ -253,4 +255,4 @@ if __name__ == "__main__":
     print("Setting up hardware ...")
     setup_hardware(args.tpu_mode, args.cpu_frequency)
     print("Starting experiment.")
-    run(args.n_samples, args.network, args.tpu_mode != 'off', args.cloud_gpu)
+    run(args.n_samples, args.network, args.tpu_mode != 'off', args.cloud_gpu, args.ip, args.port)
