@@ -8,6 +8,7 @@ enum Network {
   VGG16 = 0;
   RESNET50 = 1;
   MOBILENETV2 = 2;
+  VISIONTRANSFORMER = 3;
 }
 
 message SplitRequest {
@@ -20,7 +21,5 @@ message SplitRequest {
 }
 
 message SplitResponse {
-  repeated string classes = 1;
-  // 32 bit yields max 4 seconds
-  uint64 server_time = 2;
+  string label = 1;
 }

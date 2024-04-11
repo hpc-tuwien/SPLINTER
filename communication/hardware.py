@@ -1,4 +1,6 @@
+import argparse
 import subprocess
+import sys
 import time
 
 
@@ -9,7 +11,7 @@ def plug_out_tpu():
         subprocess.run(['sudo', 'uhubctl', '-l', '2', '-a', '0'], stdout=subprocess.PIPE)
         console_output = subprocess.run(['sudo', 'uhubctl'], stdout=subprocess.PIPE).stdout.decode('utf-8')
         if 'U0 enable connect' in console_output:
-            raise Exception("Could not unplug TPU.")
+            raise Exception("Error: Could not unplug TPU.")
 
 
 def plug_in_tpu():
@@ -20,7 +22,7 @@ def plug_in_tpu():
         time.sleep(0.2)
         console_output = subprocess.run(['sudo', 'uhubctl'], stdout=subprocess.PIPE).stdout.decode('utf-8')
         if 'U0 enable connect' not in console_output:
-            raise Exception("Could not plug in TPU.")
+            raise Exception("Error: Could not plug in TPU.")
 
 
 def setup_hardware(tpu_mode: str, cpu_frequency: str):
@@ -37,7 +39,7 @@ def setup_hardware(tpu_mode: str, cpu_frequency: str):
         console_output = subprocess.run(['cat', '/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq'],
                                         stdout=subprocess.PIPE).stdout.decode('utf-8')
         if cpu_frequency not in console_output:
-            raise Exception("Could not set CPU frequency.")
+            raise Exception("Error: Could not set CPU frequency.")
 
     # TPU settings
     if tpu_mode == 'off':
@@ -52,10 +54,31 @@ def setup_hardware(tpu_mode: str, cpu_frequency: str):
             console_output = subprocess.run(['apt', 'list', '--installed', 'libedgetpu*'],
                                             stdout=subprocess.PIPE).stdout.decode('utf-8')
             if tpu_mode not in console_output:
-                raise Exception("Could not install libedgetpu1-" + tpu_mode + ".")
+                raise Exception("Error: Could not install libedgetpu1-" + tpu_mode + ".")
             # eject device if already connected
             plug_out_tpu()
             # plug device in
             plug_in_tpu()
         else:
             plug_in_tpu()
+
+
+def read_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-t', '--tpu_mode', type=str, choices=['off', 'std', 'max'], default='std',
+                        help='The TPU mode to be used.')
+    # from 600 MHz to 1800 MHz in 200 MHz steps
+    parser.add_argument('-c', '--cpu_frequency', type=str, choices=[str(x) for x in range(600, 2000, 200)],
+                        default='1800', help='The CPU frequency in MHz to be used.')
+    return parser.parse_args()
+
+
+def main(args: argparse.Namespace):
+    print("Setting up hardware ...")
+    setup_hardware(args.tpu_mode, args.cpu_frequency)
+    print("Done.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(read_args()))
