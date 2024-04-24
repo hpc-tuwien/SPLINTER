@@ -1,5 +1,7 @@
 import argparse
 import os
+import sys
+import time
 
 import grpc
 import numpy as np
@@ -8,8 +10,8 @@ import tensorflow_datasets as tfds
 import tflite_runtime.interpreter as tflite
 from keras.src.applications import imagenet_utils
 
-from communication import service_pb2_grpc, service_pb2
-from communication.hardware import setup_hardware
+import service_pb2
+import service_pb2_grpc
 
 PATH_PREFIX = {service_pb2.VGG16: "VGG16",
                service_pb2.RESNET50: "resnet50",
@@ -165,18 +167,29 @@ def run(num_images: int, network_arg, accelerator: bool, cloud_accelerator: bool
 
         it = iter(validation_ds)
         top1 = 0
+        # do one prediction extra for loading the model on client and server
+        image, label = next(it)
+        client.split_compute(stub, image, network, partition_index, accelerator, cloud_accelerator)
+        # notify controller over stdout
+        print("<>Init done")
+        sys.stdout.flush()
+        start_time = time.perf_counter_ns()
         for img_num in range(num_images):
             image, label = next(it)
             pred_label = client.split_compute(stub, image, network, partition_index, accelerator, cloud_accelerator)
             if get_label_name(label) == pred_label:
                 top1 += 1
-        print("Layer", partition_index, "accuracy:", top1 / num_images)
+        end_time = time.perf_counter_ns()
+        print(f"<>latency: {end_time - start_time}")
+        sys.stdout.flush()
+        if network != service_pb2.VISIONTRANSFORMER:
+            print(f"<>accuracy: {top1 / num_images * 100}")
+            sys.stdout.flush()
 
 
 def read_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-g', '--cloud_gpu', action=argparse.BooleanOptionalAction, help='Use cloud accelerator (GPU).',
-                        default=False)
+    parser.add_argument('-g', '--cloud_gpu', type=bool, default=False, help='Use cloud accelerator (GPU).', )
     parser.add_argument('-m', '--model', type=str, choices=['vgg16', 'resnet50', 'mobilenetv2', 'vit'],
                         default='vgg16',
                         help='The neural network model to be used.')
@@ -189,7 +202,10 @@ def read_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def main(args: argparse.Namespace):
+    run(args.n_samples, args.model, args.tpu_mode != 'off', args.cloud_gpu, args.ip, args.port, args.splitting_point)
+    return 0
+
+
 if __name__ == "__main__":
-    args = read_args()
-    print("Starting experiment.")
-    run(args.n_samples, args.network, args.tpu_mode != 'off', args.cloud_gpu, args.ip, args.port, args.splitting_point)
+    sys.exit(main(read_args()))

@@ -74,9 +74,7 @@ def read_args() -> argparse.Namespace:
 
 
 def main(args: argparse.Namespace):
-    print("Setting up hardware ...")
     setup_hardware(args.tpu_mode, args.cpu_frequency)
-    print("Done.")
     return 0
 
 
