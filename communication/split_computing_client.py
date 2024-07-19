@@ -180,10 +180,10 @@ def run(num_images: int, network_arg, accelerator: bool, cloud_accelerator: bool
             if get_label_name(label) == pred_label:
                 top1 += 1
         end_time = time.perf_counter_ns()
-        print(f"<>latency: {end_time - start_time}")
+        print(f"<>latency: {(end_time - start_time) / num_images}")
         sys.stdout.flush()
         if network != service_pb2.VISIONTRANSFORMER:
-            print(f"<>accuracy: {top1 / num_images * 100}")
+            print(f"<>accuracy: {top1 / num_images}")
             sys.stdout.flush()
 
 
