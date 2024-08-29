@@ -1,25 +1,55 @@
 syntax = "proto3";
+import "google/protobuf/duration.proto";
 
 service SplitService {
+  rpc InitializeSession (SessionInitRequest) returns (SessionInitResponse);
   rpc SplitCompute (SplitRequest) returns (SplitResponse);
+  rpc GetMetrics (SessionInitRequest) returns (Metrics);
 }
 
 enum Network {
-  VGG16 = 0;
-  RESNET50 = 1;
-  MOBILENETV2 = 2;
-  VISIONTRANSFORMER = 3;
+  NETWORK_UNSPECIFIED = 0;
+  VGG_16 = 1;
+  RES_NET_50 = 2;
+  MOBILE_NET_V2 = 3;
+  VISION_TRANSFORMER = 4;
 }
 
-message SplitRequest {
-  Network network = 1;
-  uint32 partition_index = 2;
-  bytes tensor = 3;
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  READY = 1;
+  NOT_READY = 2;
+  ALREADY_CALCULATED = 3;
+}
+
+message SessionInitRequest {
+  uint32 num_requests = 1;
+  Network network = 2;
+  uint32 partition_index = 3;
   optional sint32 zero_point = 4;
   optional float scale = 5;
   bool accelerator = 6;
 }
 
-message SplitResponse {
-  string label = 1;
+message SessionInitResponse {
+  Status status = 1;
 }
+
+message SplitRequest {
+  uint32 id = 1;
+  bytes tensor = 2;
+}
+
+message SplitResponse {
+  uint32 id = 1;
+  string label = 2;
+}
+
+message Metrics {
+  map<uint32, google.protobuf.Duration> server_latencies = 1;
+  float cpu_utilization = 2;
+  float gpu_utilization = 3;
+  float gpu_energy = 4;
+  repeated float node_power_measurements = 5;
+}
+

@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import service_pb2 as service__pb2
+import example_pb2 as example__pb2
 
 GRPC_GENERATED_VERSION = '1.65.5'
 GRPC_VERSION = grpc.__version__
@@ -20,7 +20,7 @@ except ImportError:
 if _version_not_supported:
     warnings.warn(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in service_pb2_grpc.py depends on'
+        + f' but the generated code in example_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -30,7 +30,7 @@ if _version_not_supported:
     )
 
 
-class SplitServiceStub(object):
+class InferenceServiceStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -40,23 +40,18 @@ class SplitServiceStub(object):
             channel: A grpc.Channel.
         """
         self.InitializeSession = channel.unary_unary(
-                '/SplitService/InitializeSession',
-                request_serializer=service__pb2.SessionInitRequest.SerializeToString,
-                response_deserializer=service__pb2.SessionInitResponse.FromString,
+                '/InferenceService/InitializeSession',
+                request_serializer=example__pb2.SessionInitRequest.SerializeToString,
+                response_deserializer=example__pb2.SessionInitResponse.FromString,
                 _registered_method=True)
-        self.SplitCompute = channel.unary_unary(
-                '/SplitService/SplitCompute',
-                request_serializer=service__pb2.SplitRequest.SerializeToString,
-                response_deserializer=service__pb2.SplitResponse.FromString,
-                _registered_method=True)
-        self.GetMetrics = channel.unary_unary(
-                '/SplitService/GetMetrics',
-                request_serializer=service__pb2.SessionInitRequest.SerializeToString,
-                response_deserializer=service__pb2.Metrics.FromString,
+        self.SendInference = channel.unary_unary(
+                '/InferenceService/SendInference',
+                request_serializer=example__pb2.InferenceRequest.SerializeToString,
+                response_deserializer=example__pb2.InferenceResponse.FromString,
                 _registered_method=True)
 
 
-class SplitServiceServicer(object):
+class InferenceServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def InitializeSession(self, request, context):
@@ -65,45 +60,34 @@ class SplitServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def SplitCompute(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetMetrics(self, request, context):
+    def SendInference(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
 
-def add_SplitServiceServicer_to_server(servicer, server):
+def add_InferenceServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'InitializeSession': grpc.unary_unary_rpc_method_handler(
                     servicer.InitializeSession,
-                    request_deserializer=service__pb2.SessionInitRequest.FromString,
-                    response_serializer=service__pb2.SessionInitResponse.SerializeToString,
+                    request_deserializer=example__pb2.SessionInitRequest.FromString,
+                    response_serializer=example__pb2.SessionInitResponse.SerializeToString,
             ),
-            'SplitCompute': grpc.unary_unary_rpc_method_handler(
-                    servicer.SplitCompute,
-                    request_deserializer=service__pb2.SplitRequest.FromString,
-                    response_serializer=service__pb2.SplitResponse.SerializeToString,
-            ),
-            'GetMetrics': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetMetrics,
-                    request_deserializer=service__pb2.SessionInitRequest.FromString,
-                    response_serializer=service__pb2.Metrics.SerializeToString,
+            'SendInference': grpc.unary_unary_rpc_method_handler(
+                    servicer.SendInference,
+                    request_deserializer=example__pb2.InferenceRequest.FromString,
+                    response_serializer=example__pb2.InferenceResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'SplitService', rpc_method_handlers)
+            'InferenceService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('SplitService', rpc_method_handlers)
+    server.add_registered_method_handlers('InferenceService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class SplitService(object):
+class InferenceService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -120,9 +104,9 @@ class SplitService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/SplitService/InitializeSession',
-            service__pb2.SessionInitRequest.SerializeToString,
-            service__pb2.SessionInitResponse.FromString,
+            '/InferenceService/InitializeSession',
+            example__pb2.SessionInitRequest.SerializeToString,
+            example__pb2.SessionInitResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -134,7 +118,7 @@ class SplitService(object):
             _registered_method=True)
 
     @staticmethod
-    def SplitCompute(request,
+    def SendInference(request,
             target,
             options=(),
             channel_credentials=None,
@@ -147,36 +131,9 @@ class SplitService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/SplitService/SplitCompute',
-            service__pb2.SplitRequest.SerializeToString,
-            service__pb2.SplitResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetMetrics(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/SplitService/GetMetrics',
-            service__pb2.SessionInitRequest.SerializeToString,
-            service__pb2.Metrics.FromString,
+            '/InferenceService/SendInference',
+            example__pb2.InferenceRequest.SerializeToString,
+            example__pb2.InferenceResponse.FromString,
             options,
             channel_credentials,
             insecure,
