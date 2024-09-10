@@ -1,12 +1,12 @@
 # %%
 
-from keras.src.applications import MobileNetV2
+import tensorflow as tf
 from tqdm import tqdm
 
 from utils import split_functional_model
 
 # %%
-model = MobileNetV2(weights='imagenet')
+model = tf.keras.applications.MobileNetV2(weights='imagenet')
 # %%
 print("Save full models")
 model.save("models/tail/0")

@@ -1,12 +1,12 @@
 # %%
 
-from keras.src.applications import ResNet50
+import tensorflow as tf
 from tqdm import tqdm
 
 from utils import split_functional_model
 
 # %%
-model = ResNet50(weights='imagenet')
+model = tf.keras.applications.ResNet50(weights='imagenet')
 # %%
 print("Save full models")
 model.save("models/tail/0")

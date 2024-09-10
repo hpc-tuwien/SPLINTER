@@ -1,6 +1,5 @@
 # %%
 import tensorflow as tf
-from keras import Sequential
 from tqdm import tqdm
 from vit_keras import vit
 
@@ -33,7 +32,7 @@ model = vit.vit_b16()
 
 # %%
 def replace_gelu(model):
-    new_model = Sequential()
+    new_model = tf.keras.Sequential()
     for layer in model.layers:
         if isinstance(layer, tf.keras.layers.Lambda):
             new_layer = tf.keras.layers.Lambda(igelu)

@@ -10,4 +10,4 @@ sudo-g5k systemctl restart docker
 sudo-g5k dhclient -6 br0
 cd splinter
 docker build -t splinter .
-docker run --gpus all --rm -v /home/dmay/splinter:/splinter -p 50051:50051 splinter
+docker run --gpus all --rm -v /home/dmay/splinter:/splinter -p 50051:50051 -e "HOSTNAME=$(cat /etc/hostname)" splinter

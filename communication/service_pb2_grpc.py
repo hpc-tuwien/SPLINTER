@@ -44,14 +44,14 @@ class SplitServiceStub(object):
                 request_serializer=service__pb2.SessionInitRequest.SerializeToString,
                 response_deserializer=service__pb2.SessionInitResponse.FromString,
                 _registered_method=True)
-        self.SplitCompute = channel.unary_unary(
+        self.SplitCompute = channel.stream_stream(
                 '/SplitService/SplitCompute',
                 request_serializer=service__pb2.SplitRequest.SerializeToString,
                 response_deserializer=service__pb2.SplitResponse.FromString,
                 _registered_method=True)
         self.GetMetrics = channel.unary_unary(
                 '/SplitService/GetMetrics',
-                request_serializer=service__pb2.SessionInitRequest.SerializeToString,
+                request_serializer=service__pb2.MetricsRequest.SerializeToString,
                 response_deserializer=service__pb2.Metrics.FromString,
                 _registered_method=True)
 
@@ -65,7 +65,7 @@ class SplitServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def SplitCompute(self, request, context):
+    def SplitCompute(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -85,14 +85,14 @@ def add_SplitServiceServicer_to_server(servicer, server):
                     request_deserializer=service__pb2.SessionInitRequest.FromString,
                     response_serializer=service__pb2.SessionInitResponse.SerializeToString,
             ),
-            'SplitCompute': grpc.unary_unary_rpc_method_handler(
+            'SplitCompute': grpc.stream_stream_rpc_method_handler(
                     servicer.SplitCompute,
                     request_deserializer=service__pb2.SplitRequest.FromString,
                     response_serializer=service__pb2.SplitResponse.SerializeToString,
             ),
             'GetMetrics': grpc.unary_unary_rpc_method_handler(
                     servicer.GetMetrics,
-                    request_deserializer=service__pb2.SessionInitRequest.FromString,
+                    request_deserializer=service__pb2.MetricsRequest.FromString,
                     response_serializer=service__pb2.Metrics.SerializeToString,
             ),
     }
@@ -134,7 +134,7 @@ class SplitService(object):
             _registered_method=True)
 
     @staticmethod
-    def SplitCompute(request,
+    def SplitCompute(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -144,8 +144,8 @@ class SplitService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
+        return grpc.experimental.stream_stream(
+            request_iterator,
             target,
             '/SplitService/SplitCompute',
             service__pb2.SplitRequest.SerializeToString,
@@ -175,7 +175,7 @@ class SplitService(object):
             request,
             target,
             '/SplitService/GetMetrics',
-            service__pb2.SessionInitRequest.SerializeToString,
+            service__pb2.MetricsRequest.SerializeToString,
             service__pb2.Metrics.FromString,
             options,
             channel_credentials,

@@ -1,67 +1,302 @@
 import argparse
+import asyncio
+import configparser
+import datetime
+import math
+import multiprocessing
+import os
+import time
 import warnings
-from concurrent import futures
 
 import grpc
+import pandas as pd
+import psutil
+import pynvml
+import requests
 import tensorflow as tf
-from keras.src.applications import imagenet_utils
+from google.protobuf.duration_pb2 import Duration
+from requests.auth import HTTPBasicAuth
+from sklearn.metrics import auc
+from zeus.monitor import ZeusMonitor
 
 import service_pb2
 import service_pb2_grpc
 
-PATH_NETWORK = {service_pb2.VGG16: "VGG16",
-                service_pb2.RESNET50: "resnet50",
-                service_pb2.MOBILENETV2: "mobilenetv2",
-                service_pb2.VISIONTRANSFORMER: "ViT"}
+# Constants
+PATH_NETWORK = {
+    service_pb2.Network.VGG_16: "VGG16",
+    service_pb2.Network.RES_NET_50: "resnet50",
+    service_pb2.Network.MOBILE_NET_V2: "mobilenetv2",
+    service_pb2.Network.VISION_TRANSFORMER: "ViT"
+}
 
-ACCELERATOR = {True: "/GPU:0",
-               False: "/CPU:0"}
+ACCELERATOR = {
+    True: "/GPU:0",
+    False: "/CPU:0"
+}
 
-MAX_MESSAGE_SEND_LENGTH = 11
-MAX_MESSAGE_RECEIVE_LENGTH = 3211308
+WARMUP_INFERENCES = 5
+MAX_MESSAGE_SEND_LENGTH = -1
+MAX_MESSAGE_RECEIVE_LENGTH = -1
 
 
+# Load credentials from config.ini
+def load_credentials():
+    config = configparser.ConfigParser(interpolation=None)  # Disable interpolation
+    config.read('config.ini')
+    return config['power_api']['username'], config['power_api']['password']
+
+
+# Helper function to generate warmup input
+def generate_warmup_input(input_shape):
+    input_shape = [dim if dim is not None else 1 for dim in input_shape]  # Replace None with 1 for batch size
+    return tf.random.uniform(shape=input_shape, minval=0, maxval=1, dtype=tf.float32)
+
+
+def get_node_energy(host: str, start_time_ns, end_time_ns, num_requests):
+    """
+        Request power data from the API and compute node energy using the trapezoidal rule.
+
+        Args:
+            host (str): Hostname of the server.
+            start_time_ns (int): Start time in nanoseconds.
+            end_time_ns (int): End time in nanoseconds.
+            num_requests (int): Number of inferences to divide the total energy.
+
+        Returns:
+            float: Joules per inference.
+        """
+    # Load credentials from the INI file
+    username, password = load_credentials()
+
+    # Extract node and site from the host
+    node = host.split('-ipv6')[0]
+    site = host.split('.')[1]
+
+    # Convert the start and end times to seconds and then to UTC
+    start_time_s = math.floor(start_time_ns / 1_000_000_000)
+    end_time_s = math.ceil(end_time_ns / 1_000_000_000)
+
+    # Convert the start and end times to UTC before making the request
+    start_time_iso = datetime.datetime.utcfromtimestamp(start_time_s).isoformat() + 'Z'
+    end_time_iso = datetime.datetime.utcfromtimestamp(end_time_s).isoformat() + 'Z'
+
+    url = f"https://api.grid5000.fr/stable/sites/{site}/metrics?nodes={node}&metrics=wattmetre_power_watt&start_time={start_time_iso}&end_time={end_time_iso}"
+
+    response = requests.get(url, auth=HTTPBasicAuth(username, password), verify=False)
+
+    if response.status_code != 200:
+        raise Exception(f"Could not get power measurements.")
+
+    # Parse the JSON response
+    json_data = response.json()
+
+    # Create a dataframe from the JSON data
+    df = pd.DataFrame(json_data)
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+    # Convert the start and end timestamps to pandas datetime objects
+    start_time = pd.to_datetime(start_time_ns, unit='ns').tz_localize('UTC').tz_convert('Europe/Paris')
+    end_time = pd.to_datetime(end_time_ns, unit='ns').tz_localize('UTC').tz_convert('Europe/Paris')
+
+    # Filter the dataframe for the relevant time period
+    df_filtered = df[(df['timestamp'] >= start_time) & (df['timestamp'] <= end_time)]
+
+    if df_filtered.empty:
+        print("No data in the filtered range.")
+        return 0.0
+
+    # Extract time in seconds and power values
+    time_values = (df_filtered['timestamp'].view(int) / 1_000_000_000).values  # Convert timestamp to seconds
+    power_values = df_filtered['value'].values  # Power in watts
+
+    # Compute energy (Joules) using AUC (trapezoidal rule)
+    total_energy_joules = auc(time_values, power_values)
+
+    # Return energy per inference (joules per inference)
+    return total_energy_joules / num_requests
+
+
+# gRPC service implementation
 class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
 
     def __init__(self):
         self.network = None
         self.partition_index = None
         self.tail = None
+        self.zero_point = None
+        self.scale = None
+        self.accelerator = None
+        self.num_requests = 0
+        self.received_requests = []
+        self.latest_metrics = None
+        self.gpu_util_queue = None  # For sharing data between processes
+        self.gpu_polling_process = None
+        self.monitor = ZeusMonitor(gpu_indices=[0])
+        self.stop_event = None
+        self.metrics_ready = asyncio.Event()  # Event to signal when metrics are ready
+        # Initialize NVML and GPU handle once when the server starts
+        pynvml.nvmlInit()
+        self.gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+
         if not tf.config.list_physical_devices('GPU'):
             warnings.warn("No GPU detected.")
 
-    def SplitCompute(self, request, context):
-        with tf.device(ACCELERATOR[request.accelerator]):
-            # load tail network
-            if (request.network != self.network) or (request.partition_index != self.partition_index):
-                self.network = request.network
-                self.partition_index = request.partition_index
-                self.tail = tf.keras.models.load_model(
-                    "../" + PATH_NETWORK[self.network] + "/models/tail/" + str(self.partition_index), compile=False)
+    def get_gpu_utilization(self):
+        # Get GPU utilization rates (returns percentage)
+        utilization = pynvml.nvmlDeviceGetUtilizationRates(self.gpu_handle)
+        return utilization.gpu  # Percent of GPU utilization
 
-            if self.partition_index == 0 or self.network == service_pb2.VISIONTRANSFORMER:
-                intermediate_float = tf.io.parse_tensor(request.tensor, out_type=tf.float32)
-            # rescale to 32bit float if head network was involved
-            else:
-                tensor = tf.cast(tf.io.parse_tensor(request.tensor, out_type=tf.int8), tf.float32)
-                intermediate_float = ((tensor - request.zero_point) * request.scale)
+    def poll_gpu_utilization(self, queue, stop_event):
+        """Poll GPU utilization every second and send it to the main process."""
+        while not stop_event.is_set():
+            gpu_util = self.get_gpu_utilization()
+            queue.put(gpu_util)
+            time.sleep(1)  # Poll every second
 
-            # invoke tail network
-            preds = self.tail.predict(intermediate_float, verbose=0)
-            label = imagenet_utils.decode_predictions(preds, top=1)[0][0][0]
-            return service_pb2.SplitResponse(label=label)
+    async def InitializeSession(self, request, context):
+        print("[Server] Initializing session.")
+        self._initialize_session_variables(request)
+        self._load_and_warmup_model()
+
+        # Initialize multiprocessing resources for GPU polling
+        self.gpu_util_queue = multiprocessing.Queue()
+        self.stop_event = multiprocessing.Event()
+
+        print("[Server] Session initialized.")
+        return service_pb2.SessionInitResponse(status=service_pb2.Status.READY)
+
+    def _initialize_session_variables(self, request):
+        self.num_requests = request.num_requests
+        print(f"Requests to receive: {self.num_requests}")
+        self.network = request.network
+        self.partition_index = request.partition_index
+        self.accelerator = request.accelerator
+        if self.partition_index != 0 and self.network != service_pb2.Network.VISION_TRANSFORMER:
+            self.zero_point = request.zero_point
+            self.scale = request.scale
+        self.received_requests.clear()
+        # Reset the metrics ready event at the start of the session
+        self.metrics_ready.clear()
+
+    def _load_and_warmup_model(self):
+        print("[Server] Loading and warming up model.")
+        with tf.device(ACCELERATOR[self.accelerator]):
+            model_path = f"../{PATH_NETWORK[self.network]}/models/tail/{self.partition_index}"
+            self.tail = tf.keras.models.load_model(model_path, compile=False)
+            for _ in range(WARMUP_INFERENCES):
+                warmup_input = generate_warmup_input(self.tail.input_shape)
+                _ = tf.keras.applications.imagenet_utils.decode_predictions(self.tail.predict(warmup_input, verbose=0),
+                                                                            top=1)[0][0][0]
+        print("[Server] Model loaded and warmed up.")
+
+    async def SplitCompute(self, request_iterator, context):
+        print("[Server] Starting to receive requests.")
+
+        # Accumulate all requests
+        async for request in request_iterator:
+            self.received_requests.append(request)
+            if len(self.received_requests) == self.num_requests:
+                print("[Server] All requests received. Starting processing.")
+                break
+
+        # measurements
+        loop_start_time_ns = time.perf_counter_ns()
+        psutil.cpu_percent()
+        self.gpu_polling_process = multiprocessing.Process(target=self.poll_gpu_utilization,
+                                                           args=(self.gpu_util_queue, self.stop_event))
+        self.gpu_polling_process.start()
+        self.monitor.begin_window("inference")
+        start_time = time.time_ns()
+
+        # Process all accumulated requests at once
+        results = []
+        with tf.device(ACCELERATOR[self.accelerator]):
+            for req in sorted(self.received_requests, key=lambda r: r.id):
+                # Track start time of individual inference
+                inference_start_time_ns = time.perf_counter_ns()
+
+                intermediate_tensor = self._deserialize_tensor(req)
+                predictions = self.tail.predict(intermediate_tensor, verbose=0)
+                label = tf.keras.applications.imagenet_utils.decode_predictions(predictions, top=1)[0][0][0]
+                results.append(service_pb2.SplitResponse(id=req.id, label=label))
+
+        end_time = time.time_ns()
+        gpu_measurement = self.monitor.end_window("inference")
+        # Stop the GPU polling process after streaming results
+        self.stop_event.set()
+        cpu_utilization = psutil.cpu_percent()
+        loop_end_time_ns = time.perf_counter_ns()
+
+        # Stream the results back once all processing is done
+        print("[Server] Finished processing. Streaming results back to client.")
+        for result in results:
+            yield result
+
+        print("[Server] Finished streaming results. Now retrieving node energy.")
+
+        self.gpu_polling_process.join()
+        # Collect all GPU utilization samples from the queue
+        gpu_utilization_samples = []
+        while not self.gpu_util_queue.empty():
+            gpu_utilization_samples.append(self.gpu_util_queue.get())
+        # Calculate the average GPU utilization
+        avg_gpu_utilization = sum(gpu_utilization_samples) / len(
+            gpu_utilization_samples) if gpu_utilization_samples else 0
+
+        # Get power data
+        node_energy = get_node_energy(os.environ["HOSTNAME"], loop_start_time_ns, loop_end_time_ns, self.num_requests)
+        print("[Server] Finished getting node energy. Now saving metrics.")
+
+        duration = Duration()
+        duration.FromNanoseconds((loop_end_time_ns - loop_start_time_ns) / self.num_requests)
+
+        # Create metrics to be saved
+        self.latest_metrics = {
+            "cpu_utilization": cpu_utilization,
+            "gpu_utilization": avg_gpu_utilization,
+            "gpu_energy": gpu_measurement.total_energy / self.num_requests,
+            "node_energy": node_energy,
+            "server_latency": duration
+        }
+
+        # Set the event to signal that the metrics are ready
+        self.metrics_ready.set()
+
+    def _deserialize_tensor(self, request):
+        if self.partition_index == 0 or self.network == service_pb2.Network.VISION_TRANSFORMER:
+            return tf.io.parse_tensor(request.tensor, out_type=tf.float32)
+        tensor = tf.cast(tf.io.parse_tensor(request.tensor, out_type=tf.int8), tf.float32)
+        return (tensor - self.zero_point) * self.scale
+
+    async def GetMetrics(self, request, context):
+        # Wait until the metrics are ready
+        await self.metrics_ready.wait()
+
+        if self.latest_metrics is None:
+            raise Exception("No metrics available. Please run SplitCompute first.")
+
+        return service_pb2.Metrics(
+            server_latency=self.latest_metrics['server_latency'],
+            cpu_utilization=self.latest_metrics['cpu_utilization'],
+            gpu_utilization=self.latest_metrics['gpu_utilization'],
+            gpu_energy=self.latest_metrics['gpu_energy'],
+            node_energy=self.latest_metrics['node_energy'],
+        )
 
 
-def serve(port: int):
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1),
-                         options=[('grpc.max_send_message_length', MAX_MESSAGE_SEND_LENGTH),
-                                  ('grpc.max_receive_message_length', MAX_MESSAGE_RECEIVE_LENGTH)])
+async def serve(port: int):
+    server = grpc.aio.server(options=[
+        ('grpc.max_send_message_length', MAX_MESSAGE_SEND_LENGTH),
+        ('grpc.max_receive_message_length', MAX_MESSAGE_RECEIVE_LENGTH)
+    ])
     service_pb2_grpc.add_SplitServiceServicer_to_server(SplitServiceServicer(), server)
-    server.add_insecure_port("[::]:" + str(port))
-    server.start()
-    server.wait_for_termination()
+    server.add_insecure_port(f"[::]:{port}")
+    await server.start()
+    await server.wait_for_termination()
 
 
+# Argument parsing
 def read_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-p', '--port', type=int, default=50051, help='The port to listen on.')
@@ -70,4 +305,7 @@ def read_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = read_args()
-    serve(args.port)
+    try:
+        asyncio.run(serve(args.port))
+    finally:
+        pynvml.nvmlShutdown()
