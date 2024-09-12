@@ -3,12 +3,11 @@ import asyncio
 import configparser
 import datetime
 import math
-import multiprocessing
-import os
 import time
 import warnings
 
 import grpc
+import numpy as np
 import pandas as pd
 import psutil
 import pynvml
@@ -17,7 +16,6 @@ import tensorflow as tf
 from google.protobuf.duration_pb2 import Duration
 from requests.auth import HTTPBasicAuth
 from sklearn.metrics import auc
-from zeus.monitor import ZeusMonitor
 
 import service_pb2
 import service_pb2_grpc
@@ -107,7 +105,7 @@ def get_node_energy(host: str, start_time_ns, end_time_ns, num_requests):
         return 0.0
 
     # Extract time in seconds and power values
-    time_values = (df_filtered['timestamp'].view(int) / 1_000_000_000).values  # Convert timestamp to seconds
+    time_values = (df_filtered['timestamp'].astype(int) / 1_000_000_000).values  # Convert timestamp to seconds
     power_values = df_filtered['value'].values  # Power in watts
 
     # Compute energy (Joules) using AUC (trapezoidal rule)
@@ -130,10 +128,6 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
         self.num_requests = 0
         self.received_requests = []
         self.latest_metrics = None
-        self.gpu_util_queue = None  # For sharing data between processes
-        self.gpu_polling_process = None
-        self.monitor = ZeusMonitor(gpu_indices=[0])
-        self.stop_event = None
         self.metrics_ready = asyncio.Event()  # Event to signal when metrics are ready
         # Initialize NVML and GPU handle once when the server starts
         pynvml.nvmlInit()
@@ -147,22 +141,10 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
         utilization = pynvml.nvmlDeviceGetUtilizationRates(self.gpu_handle)
         return utilization.gpu  # Percent of GPU utilization
 
-    def poll_gpu_utilization(self, queue, stop_event):
-        """Poll GPU utilization every second and send it to the main process."""
-        while not stop_event.is_set():
-            gpu_util = self.get_gpu_utilization()
-            queue.put(gpu_util)
-            time.sleep(1)  # Poll every second
-
     async def InitializeSession(self, request, context):
         print("[Server] Initializing session.")
         self._initialize_session_variables(request)
         self._load_and_warmup_model()
-
-        # Initialize multiprocessing resources for GPU polling
-        self.gpu_util_queue = multiprocessing.Queue()
-        self.stop_event = multiprocessing.Event()
-
         print("[Server] Session initialized.")
         return service_pb2.SessionInitResponse(status=service_pb2.Status.READY)
 
@@ -200,32 +182,28 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
                 print("[Server] All requests received. Starting processing.")
                 break
 
-        # measurements
+        results = []
+        utilization_values = []
+
+        # start of measurements
         loop_start_time_ns = time.perf_counter_ns()
-        psutil.cpu_percent()
-        self.gpu_polling_process = multiprocessing.Process(target=self.poll_gpu_utilization,
-                                                           args=(self.gpu_util_queue, self.stop_event))
-        self.gpu_polling_process.start()
-        self.monitor.begin_window("inference")
         start_time = time.time_ns()
+        _ = psutil.cpu_percent()
+        energy_start = pynvml.nvmlDeviceGetTotalEnergyConsumption(self.gpu_handle)
 
         # Process all accumulated requests at once
-        results = []
+
         with tf.device(ACCELERATOR[self.accelerator]):
             for req in sorted(self.received_requests, key=lambda r: r.id):
-                # Track start time of individual inference
-                inference_start_time_ns = time.perf_counter_ns()
-
                 intermediate_tensor = self._deserialize_tensor(req)
                 predictions = self.tail.predict(intermediate_tensor, verbose=0)
+                utilization_values.append(self.get_gpu_utilization())
                 label = tf.keras.applications.imagenet_utils.decode_predictions(predictions, top=1)[0][0][0]
                 results.append(service_pb2.SplitResponse(id=req.id, label=label))
 
-        end_time = time.time_ns()
-        gpu_measurement = self.monitor.end_window("inference")
-        # Stop the GPU polling process after streaming results
-        self.stop_event.set()
+        energy_end = pynvml.nvmlDeviceGetTotalEnergyConsumption(self.gpu_handle)
         cpu_utilization = psutil.cpu_percent()
+        end_time = time.time_ns()
         loop_end_time_ns = time.perf_counter_ns()
 
         # Stream the results back once all processing is done
@@ -235,28 +213,20 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
 
         print("[Server] Finished streaming results. Now retrieving node energy.")
 
-        self.gpu_polling_process.join()
-        # Collect all GPU utilization samples from the queue
-        gpu_utilization_samples = []
-        while not self.gpu_util_queue.empty():
-            gpu_utilization_samples.append(self.gpu_util_queue.get())
-        # Calculate the average GPU utilization
-        avg_gpu_utilization = sum(gpu_utilization_samples) / len(
-            gpu_utilization_samples) if gpu_utilization_samples else 0
-
         # Get power data
-        node_energy = get_node_energy(os.environ["HOSTNAME"], loop_start_time_ns, loop_end_time_ns, self.num_requests)
+        # TODO change os.environ["HOSTNAME"]
+        node_energy = get_node_energy("gemini-2-ipv6.lyon.grid5000.fr", start_time, end_time, self.num_requests)
         print("[Server] Finished getting node energy. Now saving metrics.")
 
         duration = Duration()
-        duration.FromNanoseconds((loop_end_time_ns - loop_start_time_ns) / self.num_requests)
+        duration.FromNanoseconds(round((loop_end_time_ns - loop_start_time_ns) / self.num_requests))
 
         # Create metrics to be saved
         self.latest_metrics = {
             "cpu_utilization": cpu_utilization,
-            "gpu_utilization": avg_gpu_utilization,
-            "gpu_energy": gpu_measurement.total_energy / self.num_requests,
-            "node_energy": node_energy,
+            "gpu_utilization": np.mean(utilization_values),
+            "gpu_energy": ((energy_end - energy_start) / 1000) / self.num_requests,  # J per inference
+            "node_energy": node_energy,  # J per inference
             "server_latency": duration
         }
 
@@ -271,11 +241,12 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
 
     async def GetMetrics(self, request, context):
         # Wait until the metrics are ready
+        print("[Server] Waiting for metrics to be available.")
         await self.metrics_ready.wait()
 
         if self.latest_metrics is None:
             raise Exception("No metrics available. Please run SplitCompute first.")
-
+        print("[Server] Sending metrics.")
         return service_pb2.Metrics(
             server_latency=self.latest_metrics['server_latency'],
             cpu_utilization=self.latest_metrics['cpu_utilization'],

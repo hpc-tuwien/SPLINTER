@@ -2,7 +2,7 @@ import argparse
 import asyncio
 import os
 import time
-
+import psutil
 import grpc
 import numpy as np
 import tensorflow as tf
@@ -140,12 +140,11 @@ async def compute_head_inferences(validation_ds, n_samples, int2str, args, head=
     head_results = []
     real_labels = {}
     it = iter(validation_ds)
-
+    tensor_size_kb = 0
+    _ = psutil.cpu_percent()
     for i in range(n_samples):
         image, label = next(it)
         real_labels[i] = int2str(label)
-
-        print(f"[Client] Processing head inference for sample ID: {i}")
 
         if args.splitting_point == 0:
             batch_int = prepare_image(args.model, image)
@@ -160,11 +159,11 @@ async def compute_head_inferences(validation_ds, n_samples, int2str, args, head=
             head_result = tf.keras.applications.imagenet_utils.decode_predictions(batch_int, top=1)[0][0][0]
         else:
             head_result = tf.io.serialize_tensor(batch_int).numpy()
+            if i == 0:
+                tensor_size_kb = len(head_result) / 1024
         head_results.append((i, head_result))
-
-        print(f"[Client] Head inference for sample ID: {i} complete.")
-
-    return head_results, real_labels
+    cpu_utilization = psutil.cpu_percent()
+    return head_results, real_labels, tensor_size_kb, cpu_utilization
 
 
 async def stream_inferences(intermediate_tensors, stub, n_samples):
@@ -188,7 +187,6 @@ def calculate_accuracy(real_labels, predicted_labels, n_samples):
     """Calculate accuracy of predictions."""
     matches = sum(1 for pred_id, pred_label in predicted_labels if real_labels[pred_id] == pred_label)
     accuracy = matches / n_samples
-    print(f"<>Accuracy: {accuracy:.2%}")
     return accuracy
 
 
@@ -217,9 +215,14 @@ async def main(args):
         # Start measuring the time for the overall inference process
         start_time = time.perf_counter_ns()
 
+        print("[Client] Start computing head inferences.")
         # First, compute all head inferences
-        head_results, real_labels = await compute_head_inferences(validation_ds, args.n_samples, int2str, args,
-                                                                  head, input_details, output_details)
+        head_results, real_labels, tensor_size_kb, cpu_utilization = await compute_head_inferences(validation_ds,
+                                                                                                   args.n_samples,
+                                                                                                   int2str, args,
+                                                                                                   head, input_details,
+                                                                                                   output_details)
+        print("[Client] Finished computing head inferences.")
         edge_completed = time.perf_counter_ns()
 
         if args.splitting_point != LOCAL_COMPUTE_IDX[args.model]:
@@ -232,34 +235,47 @@ async def main(args):
         end_time = time.perf_counter_ns()
         total_time_ns = end_time - start_time
         edge_time_ns = edge_completed - start_time
+
         edge_avg_inference_time_ms = edge_time_ns / args.n_samples / 1_000_000  # Convert to ms
         total_avg_inference_time_ms = total_time_ns / args.n_samples / 1_000_000  # Convert to ms
-        print(f"<>Total average inference time: {total_avg_inference_time_ms:.2f} ms")
-        print(f"<>Edge average inference time: {edge_avg_inference_time_ms:.2f} ms")
-
-        # Calculate accuracy
+        transfer_avg_latency_ms = 0
+        cloud_avg_inference_time_ms = 0
+        cloud_avg_energy_J = 0
+        cloud_gpu_avg_energy_J = 0
+        cloud_cpu_utilization = 0
+        cloud_gpu_utilization = 0
         accuracy = calculate_accuracy(real_labels, predicted_labels, args.n_samples)
+
         if args.splitting_point != LOCAL_COMPUTE_IDX[args.model]:
             # Call GetMetrics to retrieve server-side metrics
             print("[Client] Retrieving metrics from server.")
-            get_metrics_request = service_pb2.SessionInitRequest(
-                num_requests=args.n_samples,
-                network=NETWORK_ENUM_MAP[args.model],
-                partition_index=args.splitting_point,
-                accelerator=args.cloud_gpu
-            )
+            get_metrics_request = service_pb2.MetricsRequest()
 
             # Make the gRPC call to GetMetrics
             metrics_response = await stub.GetMetrics(get_metrics_request)
+            cloud_avg_inference_time_ms = (metrics_response.server_latency.seconds * 1000) + (
+                    metrics_response.server_latency.nanos / 1_000_000)
+            transfer_avg_latency_ms = total_avg_inference_time_ms - edge_avg_inference_time_ms - cloud_avg_inference_time_ms
+            cloud_avg_energy_J = metrics_response.node_energy
+            cloud_gpu_avg_energy_J = metrics_response.gpu_energy
+            cloud_cpu_utilization = metrics_response.cpu_utilization
+            cloud_gpu_utilization = metrics_response.gpu_utilization
 
-            # Print the retrieved metrics
-            print(f"CPU Utilization: {metrics_response.cpu_utilization:.2f}")
-            print(f"GPU Utilization: {metrics_response.gpu_utilization:.2f}")
-            print(f"GPU Energy Consumption: {metrics_response.gpu_energy:.2f} Joules")
-            print(f"Node Power Measurements: {metrics_response.node_power_measurements}")
-            print("Server Latencies:")
-            for sample_id, latency in metrics_response.server_latencies.items():
-                print(f"Sample ID {sample_id}: {latency.seconds} s, {latency.nanos} ns")
+        print(f"<>Accuracy: {accuracy:.2%}")
+
+        print(f"<>Total average inference time: {total_avg_inference_time_ms:.2f} ms")
+        print(f"<>Edge average inference time: {edge_avg_inference_time_ms:.2f} ms")
+        print(f"<>Cloud average inference time: {cloud_avg_inference_time_ms:.2f} ms")
+        print(f"<>Transfer average inference time: {transfer_avg_latency_ms:.2f} ms")
+        print()
+        print(f"<>Cloud avg Energy Consumption: {cloud_avg_energy_J:.2f} J")
+        print(f"<>Cloud GPU avg Energy Consumption: {cloud_gpu_avg_energy_J:.2f} J")
+        print()
+        print(f"<>Cloud CPU Utilization: {cloud_cpu_utilization:.2f} %")
+        print(f"<>Cloud GPU Utilization: {cloud_gpu_utilization:.2f} %")
+        print(f"<>Edge CPU Utilization: {cpu_utilization:.2f} %")
+        print()
+        print(f"<>Tensor size: {tensor_size_kb:.2f} kB")
 
 
 def parse_args() -> argparse.Namespace:
