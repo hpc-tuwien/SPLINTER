@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import os
+import sys
 import time
 import psutil
 import grpc
@@ -173,13 +174,10 @@ async def stream_inferences(intermediate_tensors, stub, n_samples):
     async def request_stream():
         for i, serialized_tensor in intermediate_tensors:
             yield service_pb2.SplitRequest(id=i, tensor=serialized_tensor)
-        print("[Client] Finished streaming intermediate tensors to server.")
 
     # Stream all intermediate tensors and wait for all results
-    print("[Client] Streaming intermediate tensors to server.")
     async for response in stub.SplitCompute(request_stream()):
         predicted_labels.append((response.id, response.label))
-    print("[Client] Results received.")
     return predicted_labels
 
 
@@ -208,21 +206,19 @@ async def main(args):
             perform_warmup_inferences(head, args.model, input_details, args.splitting_point)
 
         if args.splitting_point != LOCAL_COMPUTE_IDX[args.model]:
-            print("[Client] Initializing session.")
             await initialize_session(stub, args, head)
-            print("[Client] Session initialized.")
+
+        print(f"<>Start Experiment", flush=True)
 
         # Start measuring the time for the overall inference process
         start_time = time.perf_counter_ns()
 
-        print("[Client] Start computing head inferences.")
         # First, compute all head inferences
         head_results, real_labels, tensor_size_kb, cpu_utilization = await compute_head_inferences(validation_ds,
                                                                                                    args.n_samples,
                                                                                                    int2str, args,
                                                                                                    head, input_details,
                                                                                                    output_details)
-        print("[Client] Finished computing head inferences.")
         edge_completed = time.perf_counter_ns()
 
         if args.splitting_point != LOCAL_COMPUTE_IDX[args.model]:
@@ -233,6 +229,8 @@ async def main(args):
 
         # Measure the total time for the inference process
         end_time = time.perf_counter_ns()
+        print(f"<>End Experiment", flush=True)
+
         total_time_ns = end_time - start_time
         edge_time_ns = edge_completed - start_time
 
@@ -248,7 +246,6 @@ async def main(args):
 
         if args.splitting_point != LOCAL_COMPUTE_IDX[args.model]:
             # Call GetMetrics to retrieve server-side metrics
-            print("[Client] Retrieving metrics from server.")
             get_metrics_request = service_pb2.MetricsRequest()
 
             # Make the gRPC call to GetMetrics
@@ -261,26 +258,27 @@ async def main(args):
             cloud_cpu_utilization = metrics_response.cpu_utilization
             cloud_gpu_utilization = metrics_response.gpu_utilization
 
-        print(f"<>Accuracy: {accuracy:.2%}")
+        print(f"<>Accuracy: {accuracy}")
 
-        print(f"<>Total average inference time: {total_avg_inference_time_ms:.2f} ms")
-        print(f"<>Edge average inference time: {edge_avg_inference_time_ms:.2f} ms")
-        print(f"<>Cloud average inference time: {cloud_avg_inference_time_ms:.2f} ms")
-        print(f"<>Transfer average inference time: {transfer_avg_latency_ms:.2f} ms")
-        print()
-        print(f"<>Cloud avg Energy Consumption: {cloud_avg_energy_J:.2f} J")
-        print(f"<>Cloud GPU avg Energy Consumption: {cloud_gpu_avg_energy_J:.2f} J")
-        print()
-        print(f"<>Cloud CPU Utilization: {cloud_cpu_utilization:.2f} %")
-        print(f"<>Cloud GPU Utilization: {cloud_gpu_utilization:.2f} %")
-        print(f"<>Edge CPU Utilization: {cpu_utilization:.2f} %")
-        print()
-        print(f"<>Tensor size: {tensor_size_kb:.2f} kB")
+        print(f"<>Total Latency: {total_avg_inference_time_ms}")
+        print(f"<>Edge Latency: {edge_avg_inference_time_ms}")
+        print(f"<>Cloud Latency: {cloud_avg_inference_time_ms}")
+        print(f"<>Transfer Latency: {transfer_avg_latency_ms}")
+
+        print(f"<>Cloud Energy: {cloud_avg_energy_J}")
+        print(f"<>Cloud GPU Energy: {cloud_gpu_avg_energy_J}")
+
+        print(f"<>Cloud CPU Utilization: {cloud_cpu_utilization}")
+        print(f"<>Cloud GPU Utilization: {cloud_gpu_utilization}")
+        print(f"<>Edge CPU Utilization: {cpu_utilization}")
+
+        print(f"<>Tensor Size: {tensor_size_kb}")
+        sys.stdout.flush()
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-g', '--cloud_gpu', action='store_true', help='Use cloud accelerator (GPU).')
+    parser.add_argument('-g', '--cloud_gpu', type=lambda x: (str(x).lower() == 'true'), help='Use cloud accelerator (GPU).')
     parser.add_argument('-m', '--model', type=str, choices=['vgg16', 'resnet50', 'mobilenetv2', 'vit'], default='vgg16',
                         help='The neural network model to be used.')
     parser.add_argument('-n', '--n_samples', type=int, default=100, help='The number of samples to average over.')

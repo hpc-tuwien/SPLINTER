@@ -10,9 +10,11 @@ import pandas as pd
 from optuna import Trial
 from optuna.samplers import TPESampler, NSGAIIISampler, BruteForceSampler
 from optuna.trial import TrialState
+from pandas import DataFrame
 from paramiko import AuthenticationException
 from paramiko.client import SSHClient
 from pymeas.device import GPMDevice
+from sklearn.metrics import auc
 
 LOCAL_COMPUTE_IDX = {
     "vgg16": 22,
@@ -25,36 +27,102 @@ LOGGER = optuna.logging.get_logger("optuna")
 LOGGER.setLevel(optuna.logging.INFO)
 
 
+def calculate_search_space_size(model):
+    cpu_freq_values = list(range(600, 1801, 200))
+    layer_values = list(range(0, LOCAL_COMPUTE_IDX[model] + 1))
+
+    size = 0
+
+    for layer in layer_values:
+        if model == 'vit' or layer == 0:
+            edge_choices = ['off']
+        else:
+            edge_choices = ['off', 'std', 'max']
+
+        if layer == LOCAL_COMPUTE_IDX[model]:
+            server_choices = [False]
+        else:
+            server_choices = [True, False]
+
+        # Calculate the number of unique combinations for this layer
+        size += len(cpu_freq_values) * len(edge_choices) * len(server_choices)
+
+    return size
+
+
 def get_space_configuration(model: str, trial: Trial):
-    if model == 'vit':
-        edge_choices = ['off']
+    layer = trial.suggest_int('layer', low=0, high=LOCAL_COMPUTE_IDX[model], step=1)
+
+    # Suggest from the full space
+    edge_accelerator = trial.suggest_categorical('edge-accelerator', ['off', 'std', 'max'])
+    server_accelerator = trial.suggest_categorical('server-accelerator', [True, False])
+
+    # Raise an exception to prune the trial if the configuration is invalid
+    if (model == 'vit' or layer == 0) and edge_accelerator != 'off':
+        raise optuna.TrialPruned()
+
+    if layer == LOCAL_COMPUTE_IDX[model] and server_accelerator:
+        raise optuna.TrialPruned()
+
+    return {
+        'cpu-freq': trial.suggest_int('cpu-freq', low=600, high=1800, step=200),
+        'layer': layer,
+        'edge-accelerator': edge_accelerator,
+        'server-accelerator': server_accelerator
+    }
+
+
+def extract_from_pareto(strategy: str, pareto_front: list):
+    trial_data = []
+
+    for trial in pareto_front:
+        trial_info = {
+            "trial_id": trial.number,
+            "latency": trial.values[0],
+            "params": trial.params
+        }
+        if len(trial.values) == 3:
+            trial_info.update({
+                "accuracy": trial.values[1],
+                "energy": trial.values[2]
+            })
+        elif len(trial.values) == 2:
+            trial_info.update({
+                "energy": trial.values[1]
+            })
+        trial_data.append(trial_info)
+
+    df = pd.DataFrame(trial_data)
+
+    # Expand 'params' into separate columns
+    params_df = pd.json_normalize(df['params'])
+    df = df.drop(columns='params').join(params_df)
+    if strategy in ['energy', 'latency']:
+        df_sorted = df.sort_values(by=strategy, ascending=True)
+        return df_sorted.iloc[0]
+    elif strategy == 'splinter':
+        df_sorted = df.sort_values(by=['energy', 'accuracy'], ascending=[True, False])
+        return df_sorted
+
+
+def run_evaluation(model: str, latencies: DataFrame(), port: int, ip: str, strategy: str, pareto_front: list):
+    if strategy == "edge":
+        params = {'cpu-freq': 1800,
+                  'layer': LOCAL_COMPUTE_IDX[model],
+                  'edge-accelerator': 'max',
+                  'server-accelerator': False}
+    elif strategy == "cloud":
+        params = {'cpu-freq': 1800,
+                  'layer': 0,
+                  'edge-accelerator': 'off',
+                  'server-accelerator': True}
     else:
-        edge_choices = ['off', 'std', 'max']
-    return {'cpu-freq': trial.suggest_int('cpu-freq', low=600, high=1800, step=200),
-            'layer': trial.suggest_int('layer', low=0, high=LOCAL_COMPUTE_IDX[model], step=1),
-            'edge-accelerator': trial.suggest_categorical('edge-accelerator', edge_choices),
-            'server-accelerator': trial.suggest_categorical('server-accelerator', [True, False])}
-
-
-def alternative_objective(model: str, port: int, ip: str, n_samples: int, weights: list, trial: Trial):
-    lat_min = 17.695055719
-    lat_max = 251.948823873
-    acc_min = 59
-    acc_max = 60
-    e_min = 87.9558916019154
-    e_max = 961.8902197823395
-
-    latency, accuracy, energy = objective(model, port, ip, n_samples, trial)
-    trial.set_user_attr('latency', latency)
-    trial.set_user_attr('accuracy', accuracy)
-    trial.set_user_attr('energy', energy)
-
-    # min max scaling
-    latency = (latency - lat_min) / (lat_max - lat_min)
-    accuracy = (accuracy - acc_min) / (acc_max - acc_min)
-    energy = (energy - e_min) / (e_max - e_min)
-    # one minimization measure with main focus on latency
-    return weights[0] * latency - weights[1] * accuracy + weights[2] * energy
+        considered_trials = extract_from_pareto(strategy, pareto_front)
+        if strategy in ["energy", "latency"]:
+            params = {'cpu-freq': considered_trials['cpu-freq'],
+                      'layer': considered_trials['layer'],
+                      'edge-accelerator': considered_trials['edge-accelerator'],
+                      'server-accelerator': considered_trials['server-accelerator']}
 
 
 def objective(model: str, port: int, ip: str, n_samples: int, pruning: bool, trial: Trial) -> tuple:
@@ -68,7 +136,7 @@ def objective(model: str, port: int, ip: str, n_samples: int, pruning: bool, tri
 
     ssh_client = get_ssh_client({'host': '128.131.169.160', 'port': 22, 'username': 'pi', 'password': 'rucon2020'})
     setup_pi(space_configuration['cpu-freq'], space_configuration['edge-accelerator'], ssh_client)
-    time.sleep(0.3)
+    time.sleep(0.4)
 
     command = f"cd /home/pi/may_research/communication/ && source /home/pi/.virtualenvs/tensorflow/bin/activate && " \
               f"python split_computing_client.py " \
@@ -93,19 +161,61 @@ def objective(model: str, port: int, ip: str, n_samples: int, pruning: bool, tri
         stdin.close()
 
         for line in stdout:
-            if "Init done" in line:
-                # start power measurement
-                measurement_thread = power_meter_device.start_power_capture(0.005)
-            elif "latency" in line:
-                # stop power measurement
-                power = power_meter_device.stop_power_capture(measurement_thread)
-                power_meter_device.disconnect()
-                # extract and save avg latency in ms
-                latency = float(line.strip().split()[1]) / 1_000_000
-                # calculate energy in mJ by using the median power consumption
-                df = pd.DataFrame(power.items(), columns=['timestamp', 'value'])
-                energy = df['value'].quantile(0.5) * latency
-            elif "accuracy" in line:
+            if "Start Experiment" in line:
+                # start power measurement on edge
+                measurement_thread = power_meter_device.start_power_capture(0.2)
+            elif "End Experiment" in line:
+                # Stop power measurement and retrieve the power data (timestamps and power values)
+                power_data = power_meter_device.stop_power_capture(measurement_thread)
+
+                # Extract timestamps and power values from the returned data
+                timestamps = list(power_data.keys())  # timestamps are in seconds (Unix epoch)
+                power_values = list(power_data.values())  # Power values in watts
+
+                # Perform trapezoidal integration using sklearn's AUC
+                energy_edge = auc(timestamps, power_values) / n_samples  # Total energy in Joules
+                trial.set_user_attr('avg energy edge (J)', energy_edge)
+            elif "Total Latency" in line:
+                # extract and save avg total latency in ms
+                latency_total = float(line.strip().split()[2])
+            elif "Cloud Latency" in line:
+                # extract and save avg cloud latency in ms
+                latency_server = float(line.strip().split()[2])
+                trial.set_user_attr('avg latency cloud (ms)', latency_server)
+            elif "Transfer Latency" in line:
+                # extract and save avg transfer latency in ms
+                latency_transfer = float(line.strip().split()[2])
+                trial.set_user_attr('avg latency transfer (ms)', latency_transfer)
+            elif "Edge Latency" in line:
+                # extract and save avg edge latency in ms
+                latency_edge = float(line.strip().split()[2])
+                trial.set_user_attr('avg latency edge (ms)', latency_edge)
+            elif "Cloud Energy" in line:
+                # extract and save avg cloud energy in J
+                energy_cloud = float(line.strip().split()[2])
+                trial.set_user_attr('avg energy cloud (J)', energy_cloud)
+                energy_total = energy_cloud + energy_edge
+            elif "Cloud GPU Energy" in line:
+                # extract and save avg cloud gpu energy in J
+                energy_cloud_gpu = float(line.strip().split()[3])
+                trial.set_user_attr('avg energy cloud gpu (J)', energy_cloud_gpu)
+            elif "Tensor Size" in line:
+                # extract and save tensor size in KB
+                tensor_size = float(line.strip().split()[2])
+                trial.set_user_attr('tensor size (KB)', tensor_size)
+            elif "Edge CPU Utilization" in line:
+                # extract and save edge cpu utilization in %
+                edge_cpu_utilization = float(line.strip().split()[3])
+                trial.set_user_attr('utilization edge cpu (%)', edge_cpu_utilization)
+            elif "Cloud CPU Utilization" in line:
+                # extract and save cloud cpu utilization in %
+                cloud_cpu_utilization = float(line.strip().split()[3])
+                trial.set_user_attr('utilization cloud cpu (%)', cloud_cpu_utilization)
+            elif "Cloud GPU Utilization" in line:
+                # extract and save cloud gpu utilization in %
+                cloud_gpu_utilization = float(line.strip().split()[3])
+                trial.set_user_attr('utilization cloud gpu (%)', cloud_gpu_utilization)
+            elif "Accuracy" in line:
                 # extract and save accuracy
                 accuracy = float(line.strip().split()[1])
             else:
@@ -117,15 +227,16 @@ def objective(model: str, port: int, ip: str, n_samples: int, pruning: bool, tri
         if exit_status == 0:
             LOGGER.info(f"Experiment finished")
             if model == 'vit':
-                return latency, energy
+                return latency_total, energy_total
             else:
-                return latency, accuracy, energy
+                return latency_total, accuracy, energy_total
         else:
             ssh_client.close()
             raise Exception(f"Experiment terminated with error: {exit_status}.")
     except Exception as e:
         ssh_client.close()
-        LOGGER.error(f"Failed to execute energy consumption experiment with run configuration: {space_configuration}.")
+        LOGGER.error(
+            f"Failed to execute experiment with run configuration: {space_configuration}.")
         LOGGER.exception(e)
         if model == 'vit':
             return float('nan'), float('nan')
@@ -173,32 +284,6 @@ def get_ssh_client(device: dict) -> SSHClient:
         raise e
 
 
-def setup_grid5k():
-    pass
-
-
-def run_optimization_single(model: str, port: int, ip: str, n_samples: int, n_trials: int, weights: list):
-    LOGGER.info(f"Starting study for model {model}.")
-    objectives = ['lat', 'acc', 'eng']
-    study = optuna.create_study(study_name=f"{model}_{objectives[numpy.argmax(weights)]}_{n_trials}",
-                                sampler=TPESampler(seed=11809922),
-                                directions=["minimize"], storage="sqlite:///bigstudy.db",
-                                load_if_exists=True)
-    while True:
-        LOGGER.info(f"Number of trials executed: {len(study.trials)}")
-        LOGGER.info(f"Number of complete trials: {len(study.get_trials(states=[TrialState.COMPLETE]))}.")
-        LOGGER.info(f"Number of trials on the Pareto front: {len(study.best_trials)}.")
-
-        if len(study.get_trials(states=[TrialState.COMPLETE])) < n_trials:
-            missing_trials = n_trials - len(study.get_trials(states=[TrialState.COMPLETE]))
-            LOGGER.info(f"Number of missing trials to reach {n_trials}: {missing_trials}.")
-            study.optimize(partial(alternative_objective, model, port, ip, n_samples, weights), n_trials=missing_trials,
-                           show_progress_bar=True)
-        else:
-            LOGGER.info(f"{n_trials} trials threshold reached.")
-            break
-
-
 def run_optimization_multi(model: str, port: int, ip: str, n_samples: int, fraction_trails: float, algorithm: str,
                            pruning: bool):
     LOGGER.info(
@@ -211,10 +296,7 @@ def run_optimization_multi(model: str, port: int, ip: str, n_samples: int, fract
     elif algorithm == 'grid':
         sampler = BruteForceSampler()
 
-    if model == 'vit':
-        n_trials = ceil((7 * 2 * (LOCAL_COMPUTE_IDX[model] + 1)) * fraction_trails)
-    else:
-        n_trials = ceil((7 * 3 * 2 * (LOCAL_COMPUTE_IDX[model] + 1)) * fraction_trails)
+    n_trials = ceil(calculate_search_space_size(model) * fraction_trails)
 
     if model == "vit":
         directions = ["minimize", "minimize"]
@@ -223,13 +305,13 @@ def run_optimization_multi(model: str, port: int, ip: str, n_samples: int, fract
 
     study = optuna.create_study(study_name=f"{model}_{algorithm}_{fraction_trails}_pruning_{pruning}", sampler=sampler,
                                 directions=directions,
-                                storage=f"sqlite:///exhaustive.db",
+                                storage=f"sqlite:///splinter.db",
                                 load_if_exists=True)
 
     if model == "vit":
-        study.set_metric_names(["latency in ms", "energy in mJ"])
+        study.set_metric_names(["latency (ms)", "energy (J)"])
     else:
-        study.set_metric_names(["latency in ms", "accuracy", "energy in mJ"])
+        study.set_metric_names(["latency (ms)", "accuracy", "energy (J)"])
 
     while True:
         LOGGER.info(f"Number of trials executed: {len(study.trials)}")

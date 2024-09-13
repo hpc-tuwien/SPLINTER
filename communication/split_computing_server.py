@@ -3,6 +3,7 @@ import asyncio
 import configparser
 import datetime
 import math
+import os
 import time
 import warnings
 
@@ -142,15 +143,15 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
         return utilization.gpu  # Percent of GPU utilization
 
     async def InitializeSession(self, request, context):
-        print("[Server] Initializing session.")
+        print("[Server] Initializing session.", flush=True)
         self._initialize_session_variables(request)
         self._load_and_warmup_model()
-        print("[Server] Session initialized.")
+        print("[Server] Session initialized.", flush=True)
         return service_pb2.SessionInitResponse(status=service_pb2.Status.READY)
 
     def _initialize_session_variables(self, request):
         self.num_requests = request.num_requests
-        print(f"Requests to receive: {self.num_requests}")
+        print(f"Requests to receive: {self.num_requests}", flush=True)
         self.network = request.network
         self.partition_index = request.partition_index
         self.accelerator = request.accelerator
@@ -162,7 +163,7 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
         self.metrics_ready.clear()
 
     def _load_and_warmup_model(self):
-        print("[Server] Loading and warming up model.")
+        print("[Server] Loading and warming up model.", flush=True)
         with tf.device(ACCELERATOR[self.accelerator]):
             model_path = f"../{PATH_NETWORK[self.network]}/models/tail/{self.partition_index}"
             self.tail = tf.keras.models.load_model(model_path, compile=False)
@@ -170,16 +171,16 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
                 warmup_input = generate_warmup_input(self.tail.input_shape)
                 _ = tf.keras.applications.imagenet_utils.decode_predictions(self.tail.predict(warmup_input, verbose=0),
                                                                             top=1)[0][0][0]
-        print("[Server] Model loaded and warmed up.")
+        print("[Server] Model loaded and warmed up.", flush=True)
 
     async def SplitCompute(self, request_iterator, context):
-        print("[Server] Starting to receive requests.")
+        print("[Server] Starting to receive requests.", flush=True)
 
         # Accumulate all requests
         async for request in request_iterator:
             self.received_requests.append(request)
             if len(self.received_requests) == self.num_requests:
-                print("[Server] All requests received. Starting processing.")
+                print("[Server] All requests received. Starting processing.", flush=True)
                 break
 
         results = []
@@ -207,16 +208,15 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
         loop_end_time_ns = time.perf_counter_ns()
 
         # Stream the results back once all processing is done
-        print("[Server] Finished processing. Streaming results back to client.")
+        print("[Server] Finished processing. Streaming results back to client.", flush=True)
         for result in results:
             yield result
 
-        print("[Server] Finished streaming results. Now retrieving node energy.")
+        print("[Server] Finished streaming results. Now retrieving node energy.", flush=True)
 
         # Get power data
-        # TODO change os.environ["HOSTNAME"]
-        node_energy = get_node_energy("gemini-2-ipv6.lyon.grid5000.fr", start_time, end_time, self.num_requests)
-        print("[Server] Finished getting node energy. Now saving metrics.")
+        node_energy = get_node_energy(os.environ["HOSTNAME"], start_time, end_time, self.num_requests)
+        print("[Server] Finished getting node energy. Now saving metrics.", flush=True)
 
         duration = Duration()
         duration.FromNanoseconds(round((loop_end_time_ns - loop_start_time_ns) / self.num_requests))
@@ -241,12 +241,12 @@ class SplitServiceServicer(service_pb2_grpc.SplitServiceServicer):
 
     async def GetMetrics(self, request, context):
         # Wait until the metrics are ready
-        print("[Server] Waiting for metrics to be available.")
+        print("[Server] Waiting for metrics to be available.", flush=True)
         await self.metrics_ready.wait()
 
         if self.latest_metrics is None:
             raise Exception("No metrics available. Please run SplitCompute first.")
-        print("[Server] Sending metrics.")
+        print("[Server] Sending metrics.", flush=True)
         return service_pb2.Metrics(
             server_latency=self.latest_metrics['server_latency'],
             cpu_utilization=self.latest_metrics['cpu_utilization'],
