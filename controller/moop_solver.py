@@ -4,11 +4,10 @@ import time
 from functools import partial
 from math import ceil
 
-import numpy
 import optuna
 import pandas as pd
 from optuna import Trial
-from optuna.samplers import TPESampler, NSGAIIISampler, BruteForceSampler
+from optuna.samplers import TPESampler, NSGAIIISampler, BruteForceSampler, GridSampler
 from optuna.trial import TrialState
 from pandas import DataFrame
 from paramiko import AuthenticationException
@@ -51,10 +50,13 @@ def calculate_search_space_size(model):
 
 
 def get_space_configuration(model: str, trial: Trial):
-    layer = trial.suggest_int('layer', low=0, high=LOCAL_COMPUTE_IDX[model], step=1)
+    cpu_freq = trial.suggest_int('cpu-freq', low=600, high=1800, step=200)
 
     # Suggest from the full space
     edge_accelerator = trial.suggest_categorical('edge-accelerator', ['off', 'std', 'max'])
+
+    layer = trial.suggest_int('layer', low=0, high=LOCAL_COMPUTE_IDX[model], step=1)
+
     server_accelerator = trial.suggest_categorical('server-accelerator', [True, False])
 
     # Raise an exception to prune the trial if the configuration is invalid
@@ -65,44 +67,83 @@ def get_space_configuration(model: str, trial: Trial):
         raise optuna.TrialPruned()
 
     return {
-        'cpu-freq': trial.suggest_int('cpu-freq', low=600, high=1800, step=200),
-        'layer': layer,
+        'cpu-freq': cpu_freq,
         'edge-accelerator': edge_accelerator,
+        'layer': layer,
         'server-accelerator': server_accelerator
     }
 
 
-def extract_from_pareto(strategy: str, pareto_front: list):
+# Function to extract trial info and parse into DataFrame
+def extract_trial_info(trial):
+    trial_info = {
+        "trial_id": trial.number,
+        "latency": trial.values[0],
+        "params": trial.params,
+        "attributes": trial.user_attrs
+    }
+    if len(trial.values) == 3:
+        trial_info.update({
+            "accuracy": trial.values[1],
+            "energy": trial.values[2]
+        })
+    elif len(trial.values) == 2:
+        trial_info.update({
+            "energy": trial.values[1]
+        })
+    return trial_info
+
+
+# Pre-sort the Pareto front once
+def sort_pareto_front(pareto_front: list, strategy: str) -> pd.DataFrame:
     trial_data = []
 
     for trial in pareto_front:
-        trial_info = {
-            "trial_id": trial.number,
-            "latency": trial.values[0],
-            "params": trial.params
-        }
-        if len(trial.values) == 3:
-            trial_info.update({
-                "accuracy": trial.values[1],
-                "energy": trial.values[2]
-            })
-        elif len(trial.values) == 2:
-            trial_info.update({
-                "energy": trial.values[1]
-            })
-        trial_data.append(trial_info)
+        trial_data.append(extract_trial_info(trial))
 
     df = pd.DataFrame(trial_data)
 
-    # Expand 'params' into separate columns
+    # Expand 'params' and 'attributes' into separate columns
     params_df = pd.json_normalize(df['params'])
-    df = df.drop(columns='params').join(params_df)
-    if strategy in ['energy', 'latency']:
+    user_attr_df = pd.json_normalize(df['attributes'])
+    df = df.drop(columns=['params', 'attributes']).join(params_df).join(user_attr_df)
+
+    # Sort based on the strategy (once)
+    if 'splinter' in strategy:
+        if 'accuracy' in df.columns:
+            df_sorted = df.sort_values(by=['energy', 'accuracy'], ascending=[True, False])
+        else:
+            df_sorted = df.sort_values(by='energy', ascending=True)
+    elif strategy in ['energy', 'latency']:
         df_sorted = df.sort_values(by=strategy, ascending=True)
-        return df_sorted.iloc[0]
-    elif strategy == 'splinter':
-        df_sorted = df.sort_values(by=['energy', 'accuracy'], ascending=[True, False])
-        return df_sorted
+
+    return df_sorted
+
+
+def extract_from_pareto(strategy: str, pareto_front: pd.DataFrame, qos: float = 0.0):
+    """
+    Expects a sorted dataframe.
+    :param strategy:
+    :param pareto_front:
+    :param qos:
+    :return:
+    """
+    if strategy in ['energy', 'latency']:
+        return pareto_front.iloc[0]
+    elif 'splinter' in strategy:
+        fastest = pareto_front.iloc[0]
+        most_energy_saving = pareto_front.iloc[0]
+        for index, row in pareto_front.iterrows():
+            if row['latency'] <= qos:
+                return row
+            if row['latency'] < fastest['latency']:
+                fastest = row  # Update fastest
+            if row['energy'] < most_energy_saving['energy']:
+                most_energy_saving = row  # Update most energy saving
+        if 'latency' in strategy:
+            return fastest
+        elif 'energy' in strategy:
+            return most_energy_saving
 
 
 def run_evaluation(model: str, latencies: DataFrame(), port: int, ip: str, strategy: str, pareto_front: list):
@@ -125,8 +166,11 @@ def run_evaluation(model: str, latencies: DataFrame(), port: int, ip: str, strat
                       'server-accelerator': considered_trials['server-accelerator']}
 
 
-def objective(model: str, port: int, ip: str, n_samples: int, pruning: bool, trial: Trial) -> tuple:
+def objective(model: str, port: int, ip: str, n_samples: int, pruning: bool, trial: Trial = None) -> tuple:
+    # Use the passed configuration if space_configuration is provided, otherwise get it from the trial
+
     space_configuration = get_space_configuration(model, trial)
+
     if pruning:
         completed_trials = trial.study.get_trials(states=[optuna.trial.TrialState.COMPLETE])
 
@@ -136,7 +180,7 @@ def objective(model: str, port: int, ip: str, n_samples: int, pruning: bool, tri
 
     ssh_client = get_ssh_client({'host': '128.131.169.160', 'port': 22, 'username': 'pi', 'password': 'rucon2020'})
     setup_pi(space_configuration['cpu-freq'], space_configuration['edge-accelerator'], ssh_client)
-    time.sleep(0.4)
+    time.sleep(0.8)
 
     command = f"cd /home/pi/may_research/communication/ && source /home/pi/.virtualenvs/tensorflow/bin/activate && " \
               f"python split_computing_client.py " \
@@ -294,7 +338,10 @@ def run_optimization_multi(model: str, port: int, ip: str, n_samples: int, fract
     elif algorithm == "nsga":
         sampler = NSGAIIISampler(seed=123456789)
     elif algorithm == 'grid':
-        sampler = BruteForceSampler()
+        sampler = GridSampler({'cpu-freq': list(range(600, 1801, 200)),
+                               'edge-accelerator': ['off', 'std', 'max'],
+                               'layer': list(range(0, LOCAL_COMPUTE_IDX[model] + 1)),
+                               'server-accelerator': [True, False]})
 
     n_trials = ceil(calculate_search_space_size(model) * fraction_trails)
 
@@ -329,10 +376,10 @@ def run_optimization_multi(model: str, port: int, ip: str, n_samples: int, fract
 
 
 def main(args: argparse.Namespace):
-    run_optimization_multi('vgg16', args.port, args.ip, 1000, 0.2, 'nsga', True)
-    run_optimization_multi('resnet50', args.port, args.ip, 1000, 0.2, 'nsga', True)
-    run_optimization_multi('mobilenetv2', args.port, args.ip, 1000, 0.2, 'nsga', True)
-    run_optimization_multi('vit', args.port, args.ip, 1000, 0.2, 'nsga', True)
+    run_optimization_multi('vgg16', args.port, args.ip, 1000, 1, 'grid', True)
+    # run_optimization_multi('resnet50', args.port, args.ip, 1000, 0.2, 'nsga', True)
+    # run_optimization_multi('mobilenetv2', args.port, args.ip, 1000, 0.2, 'nsga', True)
+
     return 0
 
 
