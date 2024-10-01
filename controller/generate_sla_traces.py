@@ -12,7 +12,6 @@ network_params = {
 # Set the shape parameter for Weibull distribution
 shape_parameter = 1
 
-
 def generate_sla_samples(num_samples):
     # Prepare a list to hold all the latency values for different networks
     all_latency_values = []
@@ -38,12 +37,16 @@ def generate_sla_samples(num_samples):
         # Scale the samples
         latency_values = [(a * s) + b for s in samples]
 
-        # Append to the list with network name included
+        # Reset the index counter for each network
+        idx = 0
+
+        # Append to the list with network name and index included
         for value in latency_values:
-            all_latency_values.append((network, value))
+            all_latency_values.append((idx, network, value))
+            idx += 1  # Increment the index for each QoS request within the same network
 
     # Convert to DataFrame for easy manipulation
-    latency_df = pd.DataFrame(all_latency_values, columns=['Network', 'Latency'])
+    latency_df = pd.DataFrame(all_latency_values, columns=['Index', 'Network', 'Latency'])
 
     return latency_df
 
