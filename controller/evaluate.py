@@ -1,14 +1,32 @@
 import argparse
+import csv
 import os
 import time
 
 import optuna
 import pandas as pd
+import psutil
 from pymeas.device import GPMDevice
 from sklearn.metrics import auc
 from tqdm import tqdm
 
+overhead_log_path = 'splinter_overhead_metrics.csv'
+
 from moop_solver import extract_from_pareto, sort_pareto_front, LOCAL_COMPUTE_IDX, get_ssh_client, setup_pi
+
+
+# Utility function to log overhead metrics to CSV
+def log_overhead_metrics(phase, start_time, end_time, cpu_usage, ram_usage):
+    duration = (end_time - start_time) / 1e6  # Convert ns to ms
+    file_exists = os.path.isfile(overhead_log_path)
+
+    with open(overhead_log_path, 'a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        # Write header only if the file does not exist
+        if not file_exists:
+            writer.writerow(["Phase", "Duration (ms)", "CPU Usage (%)", "Additional RAM Usage (MB)"])
+        # Append the data
+        writer.writerow([phase, duration, cpu_usage, ram_usage])
 
 
 # Function to generate the progress file path based on the network
@@ -24,7 +42,7 @@ def read_and_filter_csv(csv_path, network):
     return df_filtered
 
 
-def run_experiment_for_qos(model, qos, strategy, params, ip):
+def run_experiment_for_qos(model, params, ip):
     """Run the configuration for a specific QoS request and return the results."""
     # Use the passed configuration if space_configuration is provided, otherwise get it from the trial
 
@@ -32,8 +50,23 @@ def run_experiment_for_qos(model, qos, strategy, params, ip):
     user_attributes = {}
 
     ssh_client = get_ssh_client({'host': '128.131.169.160', 'port': 22, 'username': 'pi', 'password': 'rucon2020'})
+
+    # Measure hardware configuration change latency
+    start_time = time.perf_counter_ns()
+    _ = psutil.cpu_percent(interval=None)
+    ram_before = psutil.virtual_memory().used / (1024 * 1024)
+
     setup_pi(params['cpu-freq'], params['edge-accelerator'], ssh_client)
-    time.sleep(0.8)
+
+    cpu_after = psutil.cpu_percent(interval=None)
+    ram_after = psutil.virtual_memory().used / (1024 * 1024)
+    end_time = time.perf_counter_ns()
+
+    # Log the hardware configuration change metrics
+    log_overhead_metrics("Hardware Configuration Change", start_time, end_time, cpu_after,
+                         ram_after - ram_before)
+
+    time.sleep(1.5)
 
     command = f"cd /home/pi/may_research/communication/ && source /home/pi/.virtualenvs/tensorflow/bin/activate && " \
               f"python split_computing_client.py " \
@@ -51,6 +84,7 @@ def run_experiment_for_qos(model, qos, strategy, params, ip):
         # setup power meter
         power_meter_device = GPMDevice(host="192.168.167.91")
         power_meter_device.connect()
+        measurement_thread = None
 
         # setup SSH
         stdin, stdout, stderr = ssh_client.exec_command(command=command)
@@ -131,31 +165,68 @@ def run_experiment_for_qos(model, qos, strategy, params, ip):
             ssh_client.close()
             raise Exception(f"Experiment terminated with error: {exit_status}.")
     except Exception as e:
+        if measurement_thread is not None:
+            try:
+                power_meter_device._stop_measurement_in_thread(measurement_thread)
+                print("Measurement thread stopped due to an error.")
+            except Exception as stop_err:
+                print(f"Failed to stop measurement thread: {stop_err}")
         ssh_client.close()
         print(
             f"Failed to execute experiment with run configuration: {params}.")
         print(e)
         return {}
+    finally:
+        ssh_client.close()
+        power_meter_device.disconnect()
 
 
 def save_run_result(df_progress, result, network):
     """Append the result to the progress DataFrame and save."""
-    # Convert result to a DataFrame and use concat to append
-    result_df = pd.DataFrame([result])
-    df_progress = pd.concat([df_progress, result_df], ignore_index=True)
+    # Check if the result contains valid data (e.g., check for required keys like 'latency', 'energy', etc.)
+    if not result or 'latency' not in result or 'energy' not in result:
+        print("Skipping failed experiment; no valid results to save.")
+        return  # Skip adding a row if the result is invalid or the experiment failed
+
+    # Load the existing progress file to ensure we are accumulating rows
+    progress_file = get_progress_file(network)
+
+    if os.path.exists(progress_file):
+        df_progress_existing = pd.read_csv(progress_file)
+        # Concatenate the new result with the existing progress DataFrame
+        df_progress = pd.concat([df_progress_existing, pd.DataFrame([result])], ignore_index=True)
+    else:
+        # If no existing progress, just append the new row
+        df_progress = pd.concat([df_progress, pd.DataFrame([result])], ignore_index=True)
+
+    # Save the updated DataFrame to the CSV file
     save_progress(df_progress, network)
+
+
+def extract_config_from_series(series):
+    """
+    Convert a pandas.Series object returned from extract_from_pareto to a dictionary format
+    similar to the cloud or edge configurations.
+    """
+    # Assuming the series has keys that match the required configuration fields
+    config = {
+        'cpu-freq': series.get('cpu-freq'),
+        'layer': series.get('layer'),
+        'edge-accelerator': series.get('edge-accelerator'),
+        'server-accelerator': series.get('server-accelerator')
+    }
+    return config
 
 
 def execute_static_strategy(index, model, qos, strategy_name, params, df_progress, network, ip_address):
     """Execute a static strategy and save the result."""
-    result = run_experiment_for_qos(model, qos, strategy_name, params, ip_address)
+    result = run_experiment_for_qos(model, params, ip_address)
     result.update({'index': index, 'qos': qos, 'strategy': strategy_name, **params})
     save_run_result(df_progress, result, network)
 
 
-def execute_static_strategies(index, model, qos, energy_config, latency_config, df_progress, network,
-                              exhaustive_pareto, ip_address, pbar):
-    """Execute and save the static strategies, skipping cloud and edge if exhaustive Pareto is True."""
+def execute_static_strategies(index, model, qos, energy_config, latency_config, df_progress, network, ip_address, pbar):
+    """Execute and save the static strategies"""
     # Check if the dataframe is empty
     if df_progress.empty:
         processed_strategies = []
@@ -163,7 +234,7 @@ def execute_static_strategies(index, model, qos, energy_config, latency_config, 
         # Check which strategies have already been processed
         processed_strategies = df_progress[df_progress['index'] == index]['strategy'].unique()
 
-    required_strategies = ['energy', 'latency'] if exhaustive_pareto else ['cloud', 'edge', 'energy', 'latency']
+    required_strategies = ['cloud', 'edge', 'energy', 'latency']
 
     if 'cloud' in required_strategies and 'cloud' not in processed_strategies:
         cloud_params = {'cpu-freq': 1800, 'layer': 0, 'edge-accelerator': 'off', 'server-accelerator': True}
@@ -182,12 +253,41 @@ def execute_static_strategies(index, model, qos, energy_config, latency_config, 
     pbar.update(1)
 
 
-def execute_dynamic_strategy_for_qos(index, model, qos, splinter_pareto_front, df_progress, network, ip_address, pbar):
+def execute_dynamic_strategy_for_qos(index, model, qos, splinter_pareto_front, df_progress, network, ip_address, pbar,
+                                     exhaustive_pareto):
     """Execute SPLINTER latency strategy dynamically and save the result."""
-    if 'splinter:latency' not in df_progress[df_progress['index'] == index]['strategy'].unique():
-        splinter_config = extract_from_pareto('splinter:latency', splinter_pareto_front, qos)
-        splinter_result = run_experiment_for_qos(model, qos, 'splinter:latency', splinter_config, ip_address)
-        splinter_result.update({'index': index, 'qos': qos, 'strategy': 'splinter:latency', **splinter_config})
+
+    # Determine the strategy name based on whether exhaustive_pareto is set
+    strategy_name = 'splinter:latency_exhaustive' if exhaustive_pareto else 'splinter:latency'
+
+    # Check if the dataframe is empty or if the 'index' column exists before filtering
+    if df_progress.empty or 'index' not in df_progress.columns:
+        processed_strategies = []
+    else:
+        # Ensure that we're checking if the 'splinter:latency' strategy has been processed
+        processed_strategies = df_progress[df_progress['index'] == index]['strategy'].unique()
+
+    if strategy_name not in processed_strategies:
+        pbar.set_description(f"Running {strategy_name} strategy for QoS {qos}")
+
+        # Measure configuration retrieval overhead for 'splinter:latency'
+        start_time = time.perf_counter_ns()
+        _ = psutil.cpu_percent(interval=None)
+        ram_before = psutil.virtual_memory().used / (1024 * 1024)
+
+        splinter_series = extract_from_pareto('splinter:latency', splinter_pareto_front, qos)
+        splinter_config = extract_config_from_series(splinter_series)
+
+        cpu_after = psutil.cpu_percent(interval=None)
+        ram_after = psutil.virtual_memory().used / (1024 * 1024)
+        end_time = time.perf_counter_ns()
+
+        # Log the configuration retrieval metrics
+        log_overhead_metrics("Configuration Retrieval", start_time, end_time, cpu_after,
+                             ram_after - ram_before)
+
+        splinter_result = run_experiment_for_qos(model, splinter_config, ip_address)
+        splinter_result.update({'index': index, 'qos': qos, 'strategy': strategy_name, **splinter_config})
         save_run_result(df_progress, splinter_result, network)
     pbar.update(1)
 
@@ -202,16 +302,30 @@ def load_progress(network):
     """Load progress from CSV if exists for the given network."""
     progress_file = get_progress_file(network)
     if os.path.exists(progress_file):
-        return pd.read_csv(progress_file)
+        # Load the existing progress file
+        df = pd.read_csv(progress_file)
+        return df
     return pd.DataFrame()
 
 
-def sort_pareto_fronts(pareto_front):
-    """Sort the Pareto front in three ways: energy, latency, splinter:latency."""
-    energy_sorted = sort_pareto_front(pareto_front, 'energy')
-    latency_sorted = sort_pareto_front(pareto_front, 'latency')
-    splinter_latency_sorted = sort_pareto_front(pareto_front, 'splinter:latency')
-    return energy_sorted, latency_sorted, splinter_latency_sorted
+def sort_pareto_fronts(pareto_front, strategies: list):
+    """
+    Sort the Pareto front based on the strategies provided in the list.
+
+    Parameters:
+        pareto_front: The Pareto front data to be sorted.
+        strategies (list): List of strategies (as strings) to sort by.
+
+    Returns:
+        A single sorted list if one strategy is given, otherwise a list of sorted lists.
+    """
+    sorted_lists = [sort_pareto_front(pareto_front, strategy) for strategy in strategies]
+
+    # Return a single sorted list if only one strategy is provided
+    if len(strategies) == 1:
+        return sorted_lists[0]
+    else:
+        return sorted_lists
 
 
 def load_pareto_front_from_study(study_name):
@@ -238,15 +352,32 @@ def continue_experiment(model, csv_path, exhaustive_pareto, ip_address):
     # Read and filter the CSV
     df_filtered = read_and_filter_csv(csv_path, model)
 
+    # Measure Pareto front loading and sorting overhead
+    start_time = time.perf_counter_ns()
+    _ = psutil.cpu_percent(interval=None)
+    ram_before = psutil.virtual_memory().used / (1024 * 1024)  # Convert bytes to MB
+
     # Load the Pareto front from the Optuna study
     pareto_front = load_pareto_front_from_study(study_name)
 
-    # Sort Pareto front in different ways
-    energy_sorted, latency_sorted, splinter_latency_sorted = sort_pareto_fronts(pareto_front)
+    # Sort Pareto front for splinter
+    splinter_latency_sorted = sort_pareto_fronts(pareto_front, ['splinter:latency'])
 
-    # Extract energy and latency configurations (only once)
-    energy_config = extract_from_pareto('energy', energy_sorted)
-    latency_config = extract_from_pareto('latency', latency_sorted)
+    cpu_after = psutil.cpu_percent(interval=None)
+    ram_after = psutil.virtual_memory().used / (1024 * 1024)  # Convert bytes to MB
+    end_time = time.perf_counter_ns()
+
+    # Log the Pareto front loading and sorting metrics
+    log_overhead_metrics("Pareto Load & Sort", start_time, end_time, cpu_after, ram_after - ram_before)
+
+    # Sort Pareto front for static baselines
+    energy_sorted, latency_sorted = sort_pareto_fronts(pareto_front, ['energy', 'latency'])
+
+    energy_series = extract_from_pareto('energy', energy_sorted)
+    energy_config = extract_config_from_series(energy_series)
+
+    latency_series = extract_from_pareto('latency', latency_sorted)
+    latency_config = extract_config_from_series(latency_series)
 
     # For each QoS request in the CSV, execute all missing strategies
     for idx, row in tqdm(df_filtered.iterrows(), total=len(df_filtered), desc=f"Processing QoS for {model}"):
@@ -254,13 +385,13 @@ def continue_experiment(model, csv_path, exhaustive_pareto, ip_address):
         index = row['Index']  # Assuming 'Index' column exists in CSV
 
         # Create a progress bar for each strategy within a QoS request
-        strategies_count = 3 if exhaustive_pareto else 5
+        strategies_count = 1 if exhaustive_pareto else 5
         with tqdm(total=strategies_count, desc=f"Processing strategies for QoS index {index}", leave=False) as pbar:
             # Check which strategies are missing for this QoS request and run them
-            execute_static_strategies(index, model, qos, energy_config, latency_config, df_progress, model,
-                                      exhaustive_pareto, ip_address, pbar)
+            execute_static_strategies(index, model, qos, energy_config, latency_config, df_progress, model, ip_address,
+                                      pbar)
             execute_dynamic_strategy_for_qos(index, model, qos, splinter_latency_sorted, df_progress, model, ip_address,
-                                             pbar)
+                                             pbar, exhaustive_pareto)
 
     print(f"Experiment for {model} completed or interrupted.")
 
@@ -279,4 +410,4 @@ if __name__ == "__main__":
 
     # Then use `ip_address` in the appropriate function calls
     # Example:
-    continue_experiment('vgg16', 'network_latency_50_samples.csv', False, ip_address)
+    continue_experiment('vgg16', 'network_latency_50_samples.csv', True, ip_address)

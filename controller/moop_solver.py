@@ -1,13 +1,15 @@
 import argparse
+import random
 import sys
 import time
 from functools import partial
+from itertools import product
 from math import ceil
 
 import optuna
 import pandas as pd
 from optuna import Trial
-from optuna.samplers import TPESampler, NSGAIIISampler, BruteForceSampler, GridSampler
+from optuna.samplers import TPESampler, NSGAIIISampler, GridSampler
 from optuna.trial import TrialState
 from pandas import DataFrame
 from paramiko import AuthenticationException
@@ -198,6 +200,7 @@ def objective(model: str, port: int, ip: str, n_samples: int, pruning: bool, tri
         # setup power meter
         power_meter_device = GPMDevice(host="192.168.167.91")
         power_meter_device.connect()
+        measurement_thread = None
 
         # setup SSH
         stdin, stdout, stderr = ssh_client.exec_command(command=command)
@@ -267,7 +270,6 @@ def objective(model: str, port: int, ip: str, n_samples: int, pruning: bool, tri
         # Check the exit status
         exit_status = stdout.channel.recv_exit_status()
         stdout.close()
-        ssh_client.close()
         if exit_status == 0:
             LOGGER.info(f"Experiment finished")
             if model == 'vit':
@@ -278,14 +280,23 @@ def objective(model: str, port: int, ip: str, n_samples: int, pruning: bool, tri
             ssh_client.close()
             raise Exception(f"Experiment terminated with error: {exit_status}.")
     except Exception as e:
-        ssh_client.close()
         LOGGER.error(
             f"Failed to execute experiment with run configuration: {space_configuration}.")
         LOGGER.exception(e)
+        if measurement_thread is not None:
+            try:
+                power_meter_device._stop_measurement_in_thread(measurement_thread)
+                LOGGER.info("Measurement thread stopped due to an error.")
+            except Exception as stop_err:
+                LOGGER.error(f"Failed to stop measurement thread: {stop_err}")
+
         if model == 'vit':
             return float('nan'), float('nan')
         else:
             return float('nan'), float('nan'), float('nan')
+    finally:
+        ssh_client.close()
+        power_meter_device.disconnect()
 
 
 def setup_pi(cpu_freq: int, tpu_mode: str, ssh_client: SSHClient):
@@ -375,10 +386,152 @@ def run_optimization_multi(model: str, port: int, ip: str, n_samples: int, fract
             break
 
 
+def get_completed_trials(study_name):
+    study = optuna.load_study(study_name=study_name, storage="sqlite:///splinter.db")
+    completed_trials = study.get_trials(states=[optuna.trial.TrialState.COMPLETE])
+    return completed_trials
+
+
+def generate_grid_trials(model):
+    try:
+        # Define the grid search space
+        search_space = {
+            'cpu-freq': list(range(600, 1801, 200)),
+            'edge-accelerator': ['off', 'std', 'max'],
+            'layer': list(range(0, LOCAL_COMPUTE_IDX[model] + 1)),
+            'server-accelerator': [True, False]
+        }
+
+        # Generate all possible combinations of the parameters
+        keys, values = zip(*search_space.items())
+        total_trials = [dict(zip(keys, v)) for v in product(*values)]
+
+        return total_trials
+    except Exception as e:
+        print(f"Error generating grid trials: {e}")
+        raise
+
+
+def subtract_completed_from_grid(model, completed_trials):
+    try:
+        # Generate all possible grid trials
+        total_trials = generate_grid_trials(model)
+
+        # Remove completed trials by comparing their parameters
+        missing_trials = [trial for trial in total_trials if trial not in [t.params for t in completed_trials]]
+
+        return missing_trials
+    except Exception as e:
+        print(f"Error subtracting completed trials from grid: {e}")
+        raise
+
+
+def dummy_objective(trial):
+    # Objective function that always fails the trial
+    raise optuna.TrialPruned()  # Alternatively, you can raise an exception to fail
+
+
+def mark_all_waiting_as_failed(study):
+    # Get all waiting trials and run the dummy objective
+    waiting_trials = study.get_trials(states=[optuna.trial.TrialState.WAITING])
+    print(f"Marking {len(waiting_trials)} waiting trials as failed.")
+
+    # Run a dummy objective for each waiting trial, marking them as failed
+    study.optimize(dummy_objective, n_trials=len(waiting_trials), catch=(Exception,))
+    print(f"Marked all waiting trials as failed.")
+
+
+def enqueue_shuffled_trials(model, study, completed_trials):
+    # Subtract completed trials and shuffle the remaining ones
+    missing_trials = subtract_completed_from_grid(model, completed_trials)
+    random.shuffle(missing_trials)
+
+    # Enqueue the missing shuffled trials
+    for trial in missing_trials:
+        study.enqueue_trial(trial)
+    print(f"Enqueued {len(missing_trials)} shuffled trials.")
+
+
+def clear_and_enqueue_missing_trials(model, port, ip, n_samples, pruning):
+    try:
+        study_name = f"{model}_grid_1_pruning_True"
+        study = optuna.load_study(study_name=study_name, storage="sqlite:///splinter.db")
+
+        # Mark all waiting trials as failed
+        mark_all_waiting_as_failed(study)
+
+        # Get completed trials
+        completed_trials = get_completed_trials(study_name)
+
+        # Enqueue shuffled missing trials
+        enqueue_shuffled_trials(model, study, completed_trials)
+
+        # Start optimization with the new queue
+        # study.optimize(partial(objective, model, port, ip, n_samples, pruning), show_progress_bar=True)
+    except Exception as e:
+        print(f"Error enqueuing missing trials: {e}")
+        raise
+
+
+def enqueue_custom_trials_with_checks(model='vgg16'):
+    study = optuna.load_study(study_name=f"{model}_grid_1_pruning_True", storage="sqlite:///splinter.db")
+    # Step 1: Mark all currently queued trials as failed
+    mark_all_waiting_as_failed(study)
+
+    # Step 2: Get completed trials
+    completed_trials = get_completed_trials(study.study_name)
+    completed_params = [trial.params for trial in completed_trials]
+
+    # Define specific trials
+    specific_trials = (
+        # CPU frequency evaluation
+            [{'cpu-freq': f, 'edge-accelerator': 'off', 'layer': 22, 'server-accelerator': False}
+             for f in range(600, 1801, 200)]
+            +
+            # Layer evaluation
+            [{'cpu-freq': 1800, 'edge-accelerator': 'off', 'layer': 0, 'server-accelerator': True}] +
+            [{'cpu-freq': 1800, 'edge-accelerator': 'max', 'layer': l, 'server-accelerator': True}
+             for l in range(1, 22)]
+            +
+            # TPU evaluation
+            [{'cpu-freq': 1800, 'edge-accelerator': e, 'layer': 22, 'server-accelerator': False}
+             for e in ['off', 'std', 'max']]
+            +
+            # Accuracy evaluation
+            [{'cpu-freq': 1800, 'edge-accelerator': 'off', 'layer': l, 'server-accelerator': True}
+             for l in range(1, 22)]
+            +
+            # Server accelerator evaluation
+            [{'cpu-freq': 1800, 'edge-accelerator': 'off', 'layer': 0, 'server-accelerator': b}
+             for b in [False, True]]
+    )
+
+    # Step 3: Enqueue specific trials if not completed yet
+    enqueued_trials = 0
+    for trial in specific_trials:
+        if trial not in completed_params:
+            for _ in range(2):  # Adjust to 3 if you need three runs
+                study.enqueue_trial(trial)
+            enqueued_trials += 1
+
+    print(f"{enqueued_trials} specific trials enqueued.")
+
+    # Step 4: Enqueue remaining missing trials
+    remaining_trials = subtract_completed_from_grid(model, completed_trials)
+    # Remove trials that are already queued or completed
+    remaining_trials = [trial for trial in remaining_trials if trial not in completed_params]
+    random.shuffle(remaining_trials)
+
+    for trial in remaining_trials:
+        study.enqueue_trial(trial)
+
+    print(f"{len(remaining_trials)} additional trials enqueued randomly.")
+
+
 def main(args: argparse.Namespace):
-    run_optimization_multi('vgg16', args.port, args.ip, 1000, 1, 'grid', True)
-    # run_optimization_multi('resnet50', args.port, args.ip, 1000, 0.2, 'nsga', True)
-    # run_optimization_multi('mobilenetv2', args.port, args.ip, 1000, 0.2, 'nsga', True)
+    #run_optimization_multi('vgg16', args.port, args.ip, 1000, 1, 'grid', True)
+    run_optimization_multi('resnet50', args.port, args.ip, 1000, 0.2, 'nsga', True)
+    run_optimization_multi('mobilenetv2', args.port, args.ip, 1000, 0.2, 'nsga', True)
 
     return 0
 
