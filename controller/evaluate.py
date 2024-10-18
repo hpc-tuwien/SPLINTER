@@ -396,6 +396,50 @@ def continue_experiment(model, csv_path, exhaustive_pareto, ip_address):
     print(f"Experiment for {model} completed or interrupted.")
 
 
+def evaluate_additional_trials(ip):
+    # Define the configurations with their respective number of repetitions
+    configurations = [
+        {'repeats': 8, 'cpu-freq': 1000, 'layer': 22, 'edge-accelerator': 'max', 'server-accelerator': False},
+        {'repeats': 8, 'cpu-freq': 1400, 'layer': 22, 'edge-accelerator': 'max', 'server-accelerator': False},
+        {'repeats': 9, 'cpu-freq': 1000, 'layer': 22, 'edge-accelerator': 'std', 'server-accelerator': False},
+        {'repeats': 9, 'cpu-freq': 1400, 'layer': 10, 'edge-accelerator': 'max', 'server-accelerator': True},
+        {'repeats': 9, 'cpu-freq': 1800, 'layer': 18, 'edge-accelerator': 'max', 'server-accelerator': True}
+    ]
+
+    # Load the progress file
+    progress_file = 'additional_trials_vgg16_exhaustive.csv'
+    if os.path.exists(progress_file):
+        df_progress = pd.read_csv(progress_file)
+    else:
+        df_progress = pd.DataFrame(
+            columns=['cpu-freq', 'layer', 'edge-accelerator', 'server-accelerator', 'repeat', 'results'])
+
+    # Iterate over each configuration
+    for config in tqdm(configurations, desc="Evaluating additional trials"):
+        for repeat in range(1, config['repeats'] + 1):
+            # Check if the specific configuration and repeat is already in the progress file
+            if not df_progress[(df_progress['cpu-freq'] == config['cpu-freq']) &
+                               (df_progress['layer'] == config['layer']) &
+                               (df_progress['edge-accelerator'] == config['edge-accelerator']) &
+                               (df_progress['server-accelerator'] == config['server-accelerator']) &
+                               (df_progress['repeat'] == repeat)].empty:
+                print(f"Configuration {config} with repeat {repeat} already evaluated, skipping...")
+                continue
+
+            # Run the experiment for the current configuration and repeat
+            result = run_experiment_for_qos('vgg16', config, ip)  # Update IP as needed
+            config_with_repeat = {**config, 'repeat': repeat, 'results': result}
+
+            # Append result to progress DataFrame
+            df_progress = pd.concat([df_progress, pd.DataFrame([config_with_repeat])], ignore_index=True)
+
+            # Save the updated progress to file after each run
+            df_progress.to_csv(progress_file, index=False)
+            print(f"Progress saved for configuration: {config}, repeat: {repeat}")
+
+    print("Evaluation of additional trials completed.")
+
+
 # Add this block for command-line argument parsing
 def parse_args():
     parser = argparse.ArgumentParser(description="Run evaluation experiment")
@@ -407,7 +451,5 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     ip_address = args.ip
-
-    # Then use `ip_address` in the appropriate function calls
-    # Example:
-    continue_experiment('vgg16', 'network_latency_50_samples.csv', True, ip_address)
+    #evaluate_additional_trials(args.ip)
+    continue_experiment('vit', 'network_latency_50_samples.csv', False, ip_address)

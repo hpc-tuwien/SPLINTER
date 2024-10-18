@@ -4,18 +4,16 @@ import matplotlib.pyplot as plt
 from scipy.stats import weibull_min
 
 # Load the samples from CSV file
-latency_df = pd.read_csv('network_latency_samples.csv')
+latency_df = pd.read_csv('../network_latency_50_samples.csv')
 
 # Reconstruct the parameters used for transformation
 network_params = {
-    'VGG16': {'min': 167.4, 'max': 5072.5},
-    'ResNet50': {'min': 66.8, 'max': 1669.3},
-    'MobileNetV2': {'min': 10.8, 'max': 391.0},
-    'Vision Transformer': {'min': 193.2, 'max': 10608.0}
+    'VGG16': {'min': 90.6, 'max': 5026.8},
+    'Vision Transformer': {'min': 118.8, 'max': 10287.6}
 }
 
 shape_parameter = 1
-samples = np.random.default_rng(seed=123456789).weibull(shape_parameter, 1000)
+samples = np.random.default_rng(seed=123456789).weibull(shape_parameter, 50)
 min_sample = np.min(samples)
 max_sample = np.max(samples)
 
@@ -31,9 +29,9 @@ def get_transformation_params(min_val, max_val):
     return a, b
 
 
-# Define font size variables
-scale_fonts = -1
+scale_fonts = 7
 label_font_size = 14 + scale_fonts
+title_font_size = 16 + scale_fonts
 tick_font_size = 12 + scale_fonts
 legend_font_size = 12 + scale_fonts
 offset_font_size = 12 + scale_fonts
@@ -77,7 +75,7 @@ plt.yticks(fontsize=tick_font_size)
 plt.tight_layout()
 
 # Save the plot
-plt.savefig('request_samples_log.pdf', format='pdf')
+plt.savefig('request_samples_log.pdf', format='pdf', bbox_inches='tight')
 
 # Show the plot
 plt.show()
