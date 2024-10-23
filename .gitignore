@@ -1,8 +1,12 @@
 .idea
 *.ipynb_checkpoints*
-*/models/*
-VGG16/__pycache__/
-resnet50/__pycache__/
+models/VGG16/__pycache__/
+models/resnet50/__pycache__/
 communication/__pycache__/
+models/ViT/__pycache__/
+controller/__pycache__/
+ubuntu-venv/*
 venv-linux
-*.csv
+communication/config.ini
+models/*/tail/*
+models/*/head/*.tflite

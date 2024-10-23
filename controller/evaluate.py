@@ -396,18 +396,13 @@ def continue_experiment(model, csv_path, exhaustive_pareto, ip_address):
     print(f"Experiment for {model} completed or interrupted.")
 
 
-def evaluate_additional_trials(ip):
+def evaluate_additional_trials(ip, configurations, model):
     # Define the configurations with their respective number of repetitions
-    configurations = [
-        {'repeats': 8, 'cpu-freq': 1000, 'layer': 22, 'edge-accelerator': 'max', 'server-accelerator': False},
-        {'repeats': 8, 'cpu-freq': 1400, 'layer': 22, 'edge-accelerator': 'max', 'server-accelerator': False},
-        {'repeats': 9, 'cpu-freq': 1000, 'layer': 22, 'edge-accelerator': 'std', 'server-accelerator': False},
-        {'repeats': 9, 'cpu-freq': 1400, 'layer': 10, 'edge-accelerator': 'max', 'server-accelerator': True},
-        {'repeats': 9, 'cpu-freq': 1800, 'layer': 18, 'edge-accelerator': 'max', 'server-accelerator': True}
-    ]
-
     # Load the progress file
-    progress_file = 'additional_trials_vgg16_exhaustive.csv'
+    if model == "vgg16":
+        progress_file = 'additional_trials_exploratory_plot.csv'
+    elif model == "vit":
+        progress_file = 'additional_trials_vit.csv'
     if os.path.exists(progress_file):
         df_progress = pd.read_csv(progress_file)
     else:
@@ -425,9 +420,8 @@ def evaluate_additional_trials(ip):
                                (df_progress['repeat'] == repeat)].empty:
                 print(f"Configuration {config} with repeat {repeat} already evaluated, skipping...")
                 continue
-
             # Run the experiment for the current configuration and repeat
-            result = run_experiment_for_qos('vgg16', config, ip)  # Update IP as needed
+            result = run_experiment_for_qos(model, config, ip)  # Update IP as needed
             config_with_repeat = {**config, 'repeat': repeat, 'results': result}
 
             # Append result to progress DataFrame
@@ -451,5 +445,27 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     ip_address = args.ip
-    #evaluate_additional_trials(args.ip)
-    continue_experiment('vit', 'network_latency_50_samples.csv', False, ip_address)
+
+
+    configurations = [
+        {'repeats': 3, 'cpu-freq': 600, 'layer': 3, 'edge-accelerator': 'off', 'server-accelerator': True},
+        {'repeats': 3, 'cpu-freq': 1400, 'layer': 6, 'edge-accelerator': 'off', 'server-accelerator': True},
+        {'repeats': 2, 'cpu-freq': 1400, 'layer': 4, 'edge-accelerator': 'off', 'server-accelerator': True},
+        {'repeats': 2, 'cpu-freq': 1200, 'layer': 11, 'edge-accelerator': 'off', 'server-accelerator': True},
+        {'repeats': 2, 'cpu-freq': 1800, 'layer': 7, 'edge-accelerator': 'off', 'server-accelerator': True},
+        {'repeats': 2, 'cpu-freq': 1800, 'layer': 17, 'edge-accelerator': 'off', 'server-accelerator': False},
+        {'repeats': 2, 'cpu-freq': 1800, 'layer': 3, 'edge-accelerator': 'off', 'server-accelerator': True}
+    ]
+    #evaluate_additional_trials(args.ip, configurations, 'vit')
+
+    configurations = [
+        {'repeats': 1, 'cpu-freq': 600, 'layer': 22, 'edge-accelerator': 'off', 'server-accelerator': False},
+        {'repeats': 1, 'cpu-freq': 800, 'layer': 22, 'edge-accelerator': 'off', 'server-accelerator': False},
+        {'repeats': 1, 'cpu-freq': 1000, 'layer': 22, 'edge-accelerator': 'off', 'server-accelerator': False},
+        {'repeats': 1, 'cpu-freq': 1200, 'layer': 22, 'edge-accelerator': 'off', 'server-accelerator': False},
+        {'repeats': 1, 'cpu-freq': 1400, 'layer': 22, 'edge-accelerator': 'off', 'server-accelerator': False},
+        {'repeats': 1, 'cpu-freq': 1600, 'layer': 22, 'edge-accelerator': 'off', 'server-accelerator': False},
+        {'repeats': 1, 'cpu-freq': 1800, 'layer': 22, 'edge-accelerator': 'off', 'server-accelerator': False},
+    ]
+    evaluate_additional_trials(args.ip, configurations, 'vgg16')
+    #continue_experiment('vit', 'network_latency_50_samples.csv', False, ip_address)

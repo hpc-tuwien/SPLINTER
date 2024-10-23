@@ -1,0 +1,126 @@
+Phase,Duration (ms),CPU Usage (%),Additional RAM Usage (MB)
+Pareto Load & Sort,4214.868273,22.1,19.0390625
+Hardware Configuration Change,468.654208,0.5,0.0
+Hardware Configuration Change,94.317087,0.0,0.0
+Hardware Configuration Change,119.155283,2.1,0.0
+Configuration Retrieval,7.298238,33.3,0.0
+Hardware Configuration Change,112.816839,0.0,0.0
+Hardware Configuration Change,128.120448,2.0,0.0
+Hardware Configuration Change,97.971689,0.0,0.0
+Hardware Configuration Change,113.193895,0.0,0.0
+Hardware Configuration Change,119.817862,2.1,0.0
+Configuration Retrieval,10.681336,25.0,0.0
+Hardware Configuration Change,122.223787,4.1,0.0
+Hardware Configuration Change,121.279472,2.1,0.0
+Hardware Configuration Change,109.27976,0.0,0.0
+Hardware Configuration Change,101.658139,0.0,0.0
+Hardware Configuration Change,120.238213,2.1,0.0
+Configuration Retrieval,9.661446,25.0,0.0
+Hardware Configuration Change,112.225712,4.4,0.0
+Hardware Configuration Change,134.411813,1.9,0.0
+Hardware Configuration Change,113.379243,0.0,0.0
+Hardware Configuration Change,132.769387,0.0,0.0
+Hardware Configuration Change,115.762937,2.2,0.0
+Configuration Retrieval,9.131295,25.0,0.0
+Hardware Configuration Change,123.245962,0.0,0.0
+Hardware Configuration Change,104.152127,0.0,0.0
+Hardware Configuration Change,100.143403,0.0,0.0
+Pareto Load & Sort,4284.643879,22.5,21.22265625
+Hardware Configuration Change,443.990724,0.6,0.0
+Hardware Configuration Change,115.024658,0.0,0.0
+Pareto Load & Sort,4291.932548,22.1,20.2265625
+Hardware Configuration Change,459.732044,0.5,0.0
+Hardware Configuration Change,116.63228,2.2,0.0
+Pareto Load & Sort,4192.730849,22.5,17.66015625
+Hardware Configuration Change,390.255814,0.0,0.0
+Hardware Configuration Change,108.208082,2.3,0.0
+Configuration Retrieval,9.916341,25.0,0.0
+Hardware Configuration Change,126.148237,0.0,0.0
+Hardware Configuration Change,122.587909,0.0,0.0
+Hardware Configuration Change,107.940717,0.0,0.0
+Hardware Configuration Change,104.081731,2.4,0.0
+Pareto Load & Sort,4253.844041,22.7,17.35546875
+Hardware Configuration Change,449.540892,1.1,0.0
+Hardware Configuration Change,107.045238,2.3,0.0
+Configuration Retrieval,9.853321,33.3,0.0
+Hardware Configuration Change,117.550585,2.2,0.0
+Hardware Configuration Change,125.718134,4.0,-0.04296875
+Hardware Configuration Change,104.745875,0.0,0.0
+Hardware Configuration Change,102.140472,0.0,0.0
+Hardware Configuration Change,120.586262,0.0,0.0
+Configuration Retrieval,7.887137,33.3,0.0
+Hardware Configuration Change,130.766035,1.9,0.0
+Hardware Configuration Change,136.985195,1.8,0.0
+Hardware Configuration Change,123.679709,0.0,0.0
+Hardware Configuration Change,111.706603,0.0,0.0
+Hardware Configuration Change,106.149866,0.0,0.0
+Configuration Retrieval,12.180687,25.0,0.0
+Hardware Configuration Change,129.841024,0.0,0.0
+Hardware Configuration Change,114.188369,0.0,0.0
+Hardware Configuration Change,103.967631,0.0,0.0
+Hardware Configuration Change,96.617652,2.6,0.0
+Hardware Configuration Change,112.250501,0.0,0.0
+Configuration Retrieval,9.207387,33.3,0.0
+Hardware Configuration Change,108.261571,2.3,0.0
+Hardware Configuration Change,143.362213,1.8,0.0
+Hardware Configuration Change,108.035888,4.5,0.0
+Hardware Configuration Change,99.626621,0.0,0.0
+Hardware Configuration Change,121.096588,4.1,0.0
+Configuration Retrieval,10.703199,0.0,0.0
+Hardware Configuration Change,118.861174,2.1,0.0
+Hardware Configuration Change,121.466605,0.0,0.0
+Hardware Configuration Change,97.325081,5.0,0.0
+Hardware Configuration Change,101.128964,2.5,0.0
+Pareto Load & Sort,4286.136687,22.3,19.34375
+Hardware Configuration Change,110.298122,0.0,-0.01953125
+Pareto Load & Sort,4225.181115,22.1,19.69140625
+Hardware Configuration Change,416.870557,1.2,0.0
+Hardware Configuration Change,125.753293,0.0,0.0
+Configuration Retrieval,9.090831,33.3,0.0
+Hardware Configuration Change,120.92521,0.0,0.0
+Hardware Configuration Change,105.06422,0.0,0.0
+Hardware Configuration Change,112.970794,2.3,0.0
+Pareto Load & Sort,4216.580896,22.8,19.64453125
+Hardware Configuration Change,479.700882,0.5,0.0
+Hardware Configuration Change,115.786233,4.3,0.0
+Hardware Configuration Change,108.126797,0.0,0.0
+Hardware Configuration Change,140.970824,1.8,0.0
+Configuration Retrieval,6.905534,33.3,0.0
+Hardware Configuration Change,120.944004,0.0,0.0
+Hardware Configuration Change,139.560032,0.0,0.0
+Hardware Configuration Change,102.112258,0.0,0.0
+Pareto Load & Sort,4215.06137,22.7,19.42578125
+Hardware Configuration Change,495.206269,0.0,-0.01171875
+Hardware Configuration Change,101.976182,0.0,0.0
+Hardware Configuration Change,133.332193,1.9,0.0
+Configuration Retrieval,5.713453,0.0,0.0
+Hardware Configuration Change,110.056258,2.3,0.0
+Hardware Configuration Change,113.391665,0.0,0.0
+Hardware Configuration Change,120.874952,0.0,0.0
+Hardware Configuration Change,95.644133,2.6,0.0
+Hardware Configuration Change,126.488353,0.0,0.0
+Configuration Retrieval,8.006719,33.3,0.0
+Hardware Configuration Change,124.647063,0.0,0.0
+Hardware Configuration Change,135.925212,0.0,0.0
+Hardware Configuration Change,100.818774,0.0,0.0
+Hardware Configuration Change,103.656203,2.4,0.0
+Hardware Configuration Change,125.241992,0.0,0.0
+Configuration Retrieval,11.500394,25.0,0.0
+Hardware Configuration Change,119.440001,2.1,0.0
+Hardware Configuration Change,106.68571,2.3,0.0
+Hardware Configuration Change,104.549736,0.0,0.0
+Hardware Configuration Change,103.443036,0.0,0.0
+Hardware Configuration Change,125.065808,0.0,0.0
+Configuration Retrieval,8.949161,25.0,0.0
+Hardware Configuration Change,124.909975,0.0,0.0
+Hardware Configuration Change,98.696395,2.6,0.0
+Hardware Configuration Change,104.202349,0.0,0.0
+Hardware Configuration Change,99.141962,0.0,0.0
+Pareto Load & Sort,4290.537278,22.3,19.91015625
+Hardware Configuration Change,483.19001,0.0,0.0
+Hardware Configuration Change,127.253506,3.8,-0.01171875
+Configuration Retrieval,9.485821,25.0,0.0
+Hardware Configuration Change,125.283944,0.0,0.0
+Hardware Configuration Change,109.279486,2.4,0.0
+Hardware Configuration Change,109.760031,0.0,0.0
+Hardware Configuration Change,107.510006,2.3,0.0

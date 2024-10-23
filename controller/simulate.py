@@ -1,5 +1,4 @@
 import os
-import os
 
 import numpy as np
 import optuna
@@ -79,7 +78,8 @@ def execute_static_strategies(index, model, qos, energy_config, latency_config, 
     results = []
     strategies = {
         'cloud': {'cpu-freq': 1800, 'layer': 0, 'edge-accelerator': 'off', 'server-accelerator': True},
-        'edge': {'cpu-freq': 1800, 'layer': LOCAL_COMPUTE_IDX[model], 'edge-accelerator': 'max',
+        'edge': {'cpu-freq': 1800, 'layer': LOCAL_COMPUTE_IDX[model],
+                 'edge-accelerator': 'max' if model == "vgg16" else "off",
                  'server-accelerator': False},
         'energy': energy_config,
         'latency': latency_config
@@ -92,6 +92,7 @@ def execute_static_strategies(index, model, qos, energy_config, latency_config, 
         pbar.update(1)
 
     return results
+
 
 def get_study_name(model, exhaustive_pareto):
     """Infer the study name based on the model and whether exhaustive Pareto is enabled."""
@@ -112,10 +113,12 @@ def execute_dynamic_strategy_for_qos(index, model, qos, splinter_pareto_front, n
 
     return splinter_result
 
+
 def load_pareto_front_from_study(study_name):
     """Load Pareto front from the Optuna study."""
     study = optuna.load_study(study_name=study_name, storage='sqlite:///splinter.db')
     return study.best_trials
+
 
 def continue_experiment(model, csv_path, exhaustive_pareto):
     """Main function to continue the experiment."""
@@ -169,4 +172,4 @@ def continue_experiment(model, csv_path, exhaustive_pareto):
 
 # In the main function or evaluation entry point
 if __name__ == "__main__":
-    continue_experiment('vgg16', 'network_latency_10000_samples.csv', False)
+    continue_experiment('vit', 'network_latency_10000_samples.csv', False)
