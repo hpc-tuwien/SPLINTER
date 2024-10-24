@@ -9,4 +9,4 @@ ubuntu-venv/*
 venv-linux
 communication/config.ini
 models/*/tail/*
-models/*/head/*.tflite
+models/*/head/*
