@@ -2,6 +2,8 @@
 
 The deployment of machine learning (ML) models on edge devices presents a unique challenge due to limited computational resources and energy constraints. SPLINTER (Split Layer Inference and Hardware-Software Co-Design) is a two-phase framework designed to optimize the deployment of neural networks (NNs) across both edge and cloud devices. SPLINTER dynamically configures both software (e.g., split layers) and hardware parameters (e.g., accelerator usage, CPU frequency) to achieve optimal performance and energy efficiency.
 
+![SPLINTER Overview](/figures/paper/overview.png)
+
 ## Abstract
 
 The deployment of ML models on edge devices is challenged by limited computational resources and energy availability. While split computing enables the decomposition of large neural networks (NNs) and allows partial computation on both edge and cloud devices, identifying the most suitable split layer and hardware configurations is a non-trivial task. This process is hindered by the large configuration space, non-linear dependencies between software and hardware parameters, heterogeneous hardware and energy characteristics, and dynamic workload conditions.
@@ -32,6 +34,7 @@ We evaluate SPLINTER using popular pre-trained NNs on a real-world testbed. Expe
 
 ### `figures/`
 - **exploratory/**: Contains exploratory figures generated during the project.
+- **paper/**: Contains additional figures related to the paper.
 - **results/**: Contains the final results figures used in the paper.
 
 ### `generate data/`
@@ -39,14 +42,14 @@ We evaluate SPLINTER using popular pre-trained NNs on a real-world testbed. Expe
 - **generate_sla_traces.py**: Script to generate synthetic workload data.
 
 ### `models/`
-- **mobilenetv2/**, **resnet50/**, **VGG16/**, **ViT/**: Contains code for splitting the respective models and the pre-split model files used in the experiments.
+- **mobilenetv2/**, **resnet50/**, **VGG16/**, **ViT/**: Contains code for splitting the respective models. The pre-split models used in the experiments can be downloaded [here](INSERT LINK).
 
 ### `plotting/`
 - Contains code for generating the various plots used in the evaluation:
-  - **exhaustive_plots.ipynb**: Jupyter notebook for generating exhaustive search plots.
-  - **exploratory_plots.ipynb**: Jupyter notebook for exploratory data analysis.
-  - **overhead_plots.ipynb**: Jupyter notebook for overhead measurements.
-  - **plot_all_sla.ipynb** and **plot_all_sla.py**: Scripts to plot SLA comparisons.
+  - **exhaustive_plots.ipynb**: Jupyter notebook for generating plots for the exhaustive comparison.
+  - **exploratory_plots.ipynb**: Jupyter notebook for plotting the exploratory analysis.
+  - **overhead_plots.ipynb**: Jupyter notebook for plotting overhead data.
+  - **plot_all_sla.ipynb** and **plot_all_sla.py**: Scripts to plot workload distributions.
   - **result_plots.ipynb**: Plots the final experiment results.
   - **simulation_plots.ipynb**: Plots related to simulation data.
 
