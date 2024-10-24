@@ -42,7 +42,7 @@ We evaluate SPLINTER using popular pre-trained NNs on a real-world testbed. Expe
 - **generate_sla_traces.py**: Script to generate synthetic workload data.
 
 ### `models/`
-- **mobilenetv2/**, **resnet50/**, **VGG16/**, **ViT/**: Contains code for splitting the respective models. The pre-split models used in the experiments can be downloaded [here](INSERT LINK).
+- **mobilenetv2/**, **resnet50/**, **VGG16/**, **ViT/**: Contains code for splitting the respective models. The pre-split models used in the experiments can be downloaded [here](https://mega.nz/file/LqYE0KpK#TF-G6WrdRuHjnp6KrrxkwhO51DnfE4J_bg93f2ZHA7M).
 
 ### `plotting/`
 - Contains code for generating the various plots used in the evaluation:
