@@ -10,3 +10,4 @@ venv-linux
 communication/config.ini
 models/*/tail/*
 models/*/head/*
+models.tar.xz
