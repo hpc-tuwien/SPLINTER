@@ -2,7 +2,7 @@
 
 The deployment of machine learning (ML) models on edge devices presents a unique challenge due to limited computational resources and energy constraints. SPLINTER (Split Layer Inference and Hardware-Software Co-Design) is a two-phase framework designed to optimize the deployment of neural networks (NNs) across both edge and cloud devices. SPLINTER dynamically configures both software (e.g., split layers) and hardware parameters (e.g., accelerator usage, CPU frequency) to achieve optimal performance and energy efficiency.
 
-![SPLINTER Overview](/figures/paper/overview.png)
+![SPLINTER Overview](./figures/paper/overview.png)
 
 ## Abstract
 
